@@ -176,7 +176,8 @@ class Layer(object):
         Set the electron lifetime due to Shockley-Read-Hall recombination (s).
         """
         self._set_param('tau_n', y1, y2, y_fun)
-        self._set_param('tau_p', y1, y2, y_fun)
+        if 'tau_p' not in self.params:
+            self._set_param('tau_p', y1, y2, y_fun)
 
     def set_tau_p(self, y1=None, y2=None, y_fun=None):
         """
@@ -201,7 +202,8 @@ class Layer(object):
         Set the electron Auger recombination coefficient (cm6 s-1).
         """
         self._set_param('Cn', y1, y2, y_fun)
-        self._set_param('Cp', y1, y2, y_fun)
+        if 'Cp' not in self.params:
+            self._set_param('Cp', y1, y2, y_fun)
 
     def set_Cp(self, y1=None, y2=None, y_fun=None):
         """
