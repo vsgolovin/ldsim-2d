@@ -88,31 +88,11 @@ class Layer(object):
         assert isinstance(dx, (float, int))
         self.dx = float(dx)
 
-        # storing necessary (n) and optional (o) parameters` names in lists
-        # and PhysParam objects in a dictionary
+        # storing necessary (n) parameters` names in a list
+        # and creating a dictionary for storing PhysParam objects
         self.n_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n',
-                             'mu_p', 'tau_n', 'B', 'Cn']
-        self.o_params = ['tau_p', 'Et', 'Cp']
+                             'mu_p', 'tau_n', 'B', 'Cn', 'eps']
         self.params = dict()  # dictionary of parameters
-
-    def check_n_params(self):
-        """
-        Check if all the necessary input parameters were specified.
-
-        Returns
-        -------
-        success : bool
-            `True` if every parameter was specified, `False` otherwise.
-        missing : list
-            List of missing parameters' names.
-        """
-        success = True
-        missing = list()
-        for s in self.n_params:
-            if s not in self.params.keys():
-                success = False
-                missing.append(s)
-        return success, missing
 
     # setters for physical parameters
     def _set_param(self, s, y1, y2, y_fun):
@@ -176,8 +156,6 @@ class Layer(object):
         Set the electron lifetime due to Shockley-Read-Hall recombination (s).
         """
         self._set_param('tau_n', y1, y2, y_fun)
-        if 'tau_p' not in self.params:
-            self._set_param('tau_p', y1, y2, y_fun)
 
     def set_tau_p(self, y1=None, y2=None, y_fun=None):
         """
@@ -202,14 +180,79 @@ class Layer(object):
         Set the electron Auger recombination coefficient (cm6 s-1).
         """
         self._set_param('Cn', y1, y2, y_fun)
-        if 'Cp' not in self.params:
-            self._set_param('Cp', y1, y2, y_fun)
 
     def set_Cp(self, y1=None, y2=None, y_fun=None):
         """
         Set the hole Auger recombination coefficient (cm6 s-1).
         """
         self._set_param('Cp', y1, y2, y_fun)
+
+    def set_eps(self, y1=None, y2=None, y_fun=None):
+        """
+        Set the relative permittivity (unitless).
+        """
+        self._set_param('eps', y1, y2, y_fun)
+
+    def check_parameters(self):
+        """
+        Check if all the necessary input parameters were specified.
+
+        Returns
+        -------
+        success : bool
+            `True` if every parameter was specified, `False` otherwise.
+        missing : list
+            List of missing parameters' names.
+        """
+        success = True
+        missing = list()
+        for s in self.n_params:
+            if s not in self.params.keys():
+                success = False
+                missing.append(s)
+        return success, missing
+
+    def prepare(self):
+        """
+        Make sure all the needed parameters are specified or calculated.
+
+        Raises
+        ------
+        Exception
+            If some necessary input parameters were not specified.
+        """
+        # checking necessary physical parameters
+        success, missing = self.check_parameters()
+        if not success:
+            msg_1 = 'Layer '+self.name+': '
+            msg_3 = 'not specified'
+            if len(missing)==1:
+                msg_2 = 'parameter '+str(missing[0])+' was '
+            else:
+                msg_2 = 'parameters '+', '.join(missing[:-1])+\
+                        ' and '+str(missing[-1])+' were '
+            msg = msg_1+msg_2+msg_3
+            raise Exception(msg)
+
+        # checking optional parameters
+        if 'tau_p' not in self.params:
+            self.params['tau_p'] = self.params['tau_n']
+        if 'Et' not in self.params:
+            # Et = (Ec+Ev) / 2
+            y_fun = lambda x: ( self.params['Ec'].value(x)
+                               +self.params['Ev'].value(x)) / 2
+            param = PhysParam(name='Et', dx=self.dx, y_fun=y_fun)
+            self.params['Et'] = param
+        if 'Cp' not in self.params:
+            self.params['Cp'] = self.params['Cn']
+
+        # calculating some useful parameters
+        # doping profile C_dop = Nd - Na
+        f = lambda x: (self.params['Nd'].value(x) - self.params['Na'].value(x))
+        self._set_param('C_dop', y_fun=f)
+        # bandgap Eg = Ec - Ev
+        f = lambda x: (self.params['Ec'].value(x) - self.params['Ev'].value(x))
+        self._set_param('Eg', y1=None, y2=None, y_fun=f)
 
 # some unnecessary tests
 def test_physparam_y1():
