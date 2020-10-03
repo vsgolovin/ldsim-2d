@@ -61,7 +61,7 @@ class PhysParam(object):
         """
         return self.name
 
-    def value(self, x):
+    def get_value(self, x):
         """
         Return physical parameter value at x=`x`.
         """
@@ -253,9 +253,9 @@ class Layer(object):
         if 'tau_p' not in self.params:
             self.params['tau_p'] = self.params['tau_n']
         if 'Et' not in self.params:
-            # Et = (Ec+Ev) / 2
-            y_fun = lambda x: ( self.params['Ec'].value(x)
-                               +self.params['Ev'].value(x)) / 2
+            # trap level Et = (Ec+Ev) / 2
+            y_fun = lambda x: ( self.params['Ec'].get_value(x)
+                               +self.params['Ev'].get_value(x)) / 2
             param = PhysParam(name='Et', dx=self.dx, y_fun=y_fun)
             self.params['Et'] = param
         if 'Cp' not in self.params:
@@ -263,11 +263,28 @@ class Layer(object):
 
         # calculating some useful parameters
         # doping profile C_dop = Nd - Na
-        f = lambda x: (self.params['Nd'].value(x) - self.params['Na'].value(x))
+        f = lambda x: ( self.params['Nd'].get_value(x)
+                       -self.params['Na'].get_value(x))
         self._set_param('C_dop', y_fun=f)
         # bandgap Eg = Ec - Ev
-        f = lambda x: (self.params['Ec'].value(x) - self.params['Ev'].value(x))
+        f = lambda x: ( self.params['Ec'].get_value(x)
+                       -self.params['Ev'].get_value(x))
         self._set_param('Eg', y1=None, y2=None, y_fun=f)
+
+    def get_value(self, p, x):
+        """
+        Get value of the physical parameter `p` at location `x`.
+
+        Parameters
+        ----------
+        p : str
+            Physical parameter name (i.e. 'Ec`).
+        x : number
+            x coordinate inside a layer.
+        """
+        pv = self.params[p]  # raises KeyError if p is not in keys
+        y = pv.get_value(x)
+        return y
 
 class Device(object):
 
@@ -278,6 +295,7 @@ class Device(object):
         """
         self.layers = dict()
         self.ind_max = -1
+        self.ready = False
 
     def add_layer(self, l, ind=-1):
         """
@@ -301,25 +319,62 @@ class Device(object):
             self.layer[ind] = l
             if ind>self.ind_max:
                 self.ind_max = ind
+        self.ready = False
 
-    def _calculate_boundaries(self):
+    def prepare(self):
         """
-        Calculate locations of layer boundaries and store them in a
-        `numpy.ndarray` `self.x_b`.
+        Prepare object for calculations:
+        1. Check if all the necessary parameters are specified in every layer.
+        2. Create a list of sorted layer indices `inds`.
+        3. Create a `numpy.ndarray` of layer boundaries `x_b`.
         """
-        indices = sorted(self.layers.keys())
-        self.x_b = np.zeros(len(indices)+1)
+        self.inds = sorted(self.layers.keys())
+        self.x_b = np.zeros(len(self.inds)+1)
         i = 1
-        for ind in indices:
-            dx = self.layers[ind]
+        for ind in self.inds:
+            l = self.layers[ind]
+            l.prepare()
+            dx = l.get_thickness()
             self.x_b[i] = self.x_b[i-1] + dx
             i += 1
+        self.ready = True
+
+    def get_value(self, p, x):
+        """
+        Calculate parameter's `p` value at location `x`.
+
+        Parameters
+        ----------
+        p : str
+            Physical parameter name (i.e. 'Ec`).
+        x : number
+            x coordinate inside a device.
+        """
+        # checking arguments
+        assert isinstance(p, str)
+        assert x <= self.x_b[-1]
+
+        # checking object
+        if not self.ready:
+            self.prepare()
+
+        # finding layer
+        for i in range(len(self.inds)):
+            if x <= self.x_b[i+1]:
+                break
+        x_rel = x - self.x_b[i]
+        ind = self.inds[i]
+        l = self.layers[ind]
+
+        # calculating value
+        y = l.get_value(p, x_rel)
+        return y
 
 # some unnecessary tests
 def test_physparam_y1():
     """Only y1 is specified."""
     p = PhysParam("mu_n", 0.1, y1=300)
-    y = p.value(0.07)
+    y = p.get_value(0.07)
     eps = 1e-6
     success = np.abs(y-300)<eps
     assert success
@@ -328,7 +383,7 @@ def test_physparam_y1y2():
     """Both y1 and y2 are specified."""
     p = PhysParam("Ec", 10, y1=1, y2=-1)
     x = np.array([0, 2, 5, 10])
-    y = p.value(x)
+    y = p.get_value(x)
     y_correct = np.array([1, 0.6, 0.0, -1.0])
     eps = 1e-6
     dy = np.abs(y-y_correct)
@@ -339,7 +394,7 @@ def test_physparam_yfun():
     """y_fun is used for calculation instead of y1 and y2."""
     p = PhysParam("Ec", 10, y1=1, y2=-1, y_fun=lambda x: x**2)
     x = np.array([0, 2, 5, 10])
-    y = p.value(x)
+    y = p.get_value(x)
     y_correct = np.array([0, 4, 25, 100])
     eps = 1e-6
     dy = np.abs(y-y_correct)
