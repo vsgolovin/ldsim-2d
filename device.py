@@ -82,6 +82,8 @@ class Layer(object):
         ----------
         name : str
             Layer name.
+        dx : number
+            Layer thickness (cm).
         """
         assert isinstance(name, str)
         self.name = name
@@ -93,6 +95,19 @@ class Layer(object):
         self.n_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n',
                              'mu_p', 'tau_n', 'B', 'Cn', 'eps']
         self.params = dict()  # dictionary of parameters
+
+    # getters
+    def get_name(self):
+        """
+        Return layer name.
+        """
+        return self.name
+
+    def get_thickness(self):
+        """
+        Return layer thickness (cm).
+        """
+        return self.dx
 
     # setters for physical parameters
     def _set_param(self, s, y1, y2, y_fun):
@@ -253,6 +268,52 @@ class Layer(object):
         # bandgap Eg = Ec - Ev
         f = lambda x: (self.params['Ec'].value(x) - self.params['Ev'].value(x))
         self._set_param('Eg', y1=None, y2=None, y_fun=f)
+
+class Device(object):
+
+    def __init__(self):
+        """
+        Class for storing a collection of `Layer` objects, each corresponding
+        to a particular index.
+        """
+        self.layers = dict()
+        self.ind_max = -1
+
+    def add_layer(self, l, ind=-1):
+        """
+        Add a layer to device.
+
+        Parameters
+        ----------
+        l : Layer
+            Layer to be added.
+        ind : int, optional
+            Index describing layer location in the device. Smaller indices
+            correspond to smaller x coordinates. Default value is `-1`, that is
+            the new layer is added to the top of the device (largest index and
+                                                             largest x).
+        """
+        assert isinstance(ind, int) and (ind>=0 or ind==-1)
+        if ind==-1:
+            self.layers[self.ind_max+1] = l
+            self.ind_max += 1
+        else:
+            self.layer[ind] = l
+            if ind>self.ind_max:
+                self.ind_max = ind
+
+    def _calculate_boundaries(self):
+        """
+        Calculate locations of layer boundaries and store them in a
+        `numpy.ndarray` `self.x_b`.
+        """
+        indices = sorted(self.layers.keys())
+        self.x_b = np.zeros(len(indices)+1)
+        i = 1
+        for ind in indices:
+            dx = self.layers[ind]
+            self.x_b[i] = self.x_b[i-1] + dx
+            i += 1
 
 # some unnecessary tests
 def test_physparam_y1():
