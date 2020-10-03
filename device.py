@@ -7,6 +7,9 @@ Created on Tue Sep 29 16:24:15 2020
 
 import numpy as np
 
+necessary = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n' 'mu_p', 'tau_n',
+             'tau_p' 'B', 'Cn', 'Cp', 'eps']
+
 class PhysParam(object):
 
     def __init__(self, name, dx, y1=None, y2=None, y_fun=None):
@@ -74,7 +77,7 @@ class PhysParam(object):
 
 class Layer(object):
 
-    def __init__(self, name, dx):
+    def __init__(self, name, dx, np=necessary):
         """
         Class for storing a collection of `PhysParam` objects.
 
@@ -84,6 +87,8 @@ class Layer(object):
             Layer name.
         dx : number
             Layer thickness (cm).
+        np : iterable
+            All the necessary physical parameters` names (str).
         """
         assert isinstance(name, str)
         self.name = name
@@ -92,8 +97,7 @@ class Layer(object):
 
         # storing necessary (n) parameters` names in a list
         # and creating a dictionary for storing PhysParam objects
-        self.n_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n',
-                             'mu_p', 'tau_n', 'B', 'Cn', 'eps']
+        self.n_params = np
         self.params = dict()  # dictionary of parameters
 
     # getters
@@ -110,103 +114,28 @@ class Layer(object):
         return self.dx
 
     # setters for physical parameters
-    def _set_param(self, s, y1, y2, y_fun):
+    def set_parameter(self, p, y1=None, y2=None, y_fun=None):
         """
-        Method for adding a generic `PhysParam` object to `self.params`
-        dictionary.
-        """
-        param = PhysParam(name=s, dx=self.dx, y1=y1, y2=y2, y_fun=y_fun)
-        self.params[s] = param
+        Add a `PhysParam` object to the layer.
 
-    def set_Ev(self, y1=None, y2=None, y_fun=None):
+        Parameters
+        ----------
+        p : str
+            Parameter name.
+        y1 : number or NoneType, Optional
+            Value of the physical parameter at x=0. Not needed if `y_fun` is
+            specified.
+        y2 : number or NoneType, Optional
+            Value of the physical parameter at x=`dx`. Values between 0 and
+            'dx' are calculated using linear interpolation. Not needed if
+            `y_fun` is specified.
+        y_fun : function or NoneType, Optional
+            Function for calculating physical parameter value at arbitrary x
+            between 0 and `dx`. Should have only one argument. Takes precedence
+            over `y1` and `y2`. 
         """
-        Set the valence band edge energy (eV).
-        """
-        self._set_param('Ev', y1, y2, y_fun)
-
-    def set_Ec(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the conduction band edge energy (eV).
-        """
-        self._set_param('Ec', y1, y2, y_fun)
-
-    def set_Nd(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the donor doping concentration (cm-3).
-        """
-        self._set_param('Nd', y1, y2, y_fun)
-
-    def set_Na(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the acception doping concentration (cm-3).
-        """
-        self._set_param('Na', y1, y2, y_fun)
-
-    def set_Nc(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the effective density of states in the conduction band (cm-3).
-        """
-        self._set_param('Nc', y1, y2, y_fun)
-
-    def set_Nv(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the effective density of states in the valence band (cm-3).
-        """
-        self._set_param('Nv', y1, y2, y_fun)
-
-    def set_mu_n(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the electron mobility (cm2 V-1 s-1).
-        """
-        self._set_param('mu_n', y1, y2, y_fun)
-
-    def set_mu_p(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the hole mobility (cm2 V-1 s-1).
-        """
-        self._set_param('mu_p', y1, y2, y_fun)
-
-    def set_tau_n(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the electron lifetime due to Shockley-Read-Hall recombination (s).
-        """
-        self._set_param('tau_n', y1, y2, y_fun)
-
-    def set_tau_p(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the hole lifetime due to Shockley-Read-Hall recombination (s).
-        """
-        self._set_param('tau_p', y1, y2, y_fun)
-
-    def set_Et(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the energy level of deep traps (eV).
-        """
-        self._set_param('Et', y1, y2, y_fun)
-
-    def set_B(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the radiative recombination coefficient (cm3 s-1).
-        """
-        self._set_param('B', y1, y2, y_fun)
-
-    def set_Cn(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the electron Auger recombination coefficient (cm6 s-1).
-        """
-        self._set_param('Cn', y1, y2, y_fun)
-
-    def set_Cp(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the hole Auger recombination coefficient (cm6 s-1).
-        """
-        self._set_param('Cp', y1, y2, y_fun)
-
-    def set_eps(self, y1=None, y2=None, y_fun=None):
-        """
-        Set the relative permittivity (unitless).
-        """
-        self._set_param('eps', y1, y2, y_fun)
+        param = PhysParam(name=p, dx=self.dx, y1=y1, y2=y2, y_fun=y_fun)
+        self.params[p] = param
 
     def check_parameters(self):
         """
@@ -249,27 +178,18 @@ class Layer(object):
             msg = msg_1+msg_2+msg_3
             raise Exception(msg)
 
-        # checking optional parameters
-        if 'tau_p' not in self.params:
-            self.params['tau_p'] = self.params['tau_n']
-        if 'Et' not in self.params:
-            # trap level Et = (Ec+Ev) / 2
-            y_fun = lambda x: ( self.params['Ec'].get_value(x)
-                               +self.params['Ev'].get_value(x)) / 2
-            param = PhysParam(name='Et', dx=self.dx, y_fun=y_fun)
-            self.params['Et'] = param
-        if 'Cp' not in self.params:
-            self.params['Cp'] = self.params['Cn']
-
         # calculating some useful parameters
         # doping profile C_dop = Nd - Na
-        f = lambda x: ( self.params['Nd'].get_value(x)
-                       -self.params['Na'].get_value(x))
-        self._set_param('C_dop', y_fun=f)
+        if ('Nd' in self.params) and ('Na' in self.params):
+            f = lambda x: ( self.params['Nd'].get_value(x)
+                           -self.params['Na'].get_value(x))
+            self.set_parameter('C_dop', y_fun=f)
+
         # bandgap Eg = Ec - Ev
-        f = lambda x: ( self.params['Ec'].get_value(x)
-                       -self.params['Ev'].get_value(x))
-        self._set_param('Eg', y1=None, y2=None, y_fun=f)
+        if ('Ec' in self.params) and ('Ev' in self.params):
+            f = lambda x: ( self.params['Ec'].get_value(x)
+                           -self.params['Ev'].get_value(x))
+            self.set_parameter('Eg', y1=None, y2=None, y_fun=f)
 
     def get_value(self, p, x):
         """
@@ -399,4 +319,37 @@ def test_physparam_yfun():
     eps = 1e-6
     dy = np.abs(y-y_correct)
     success = (dy<eps).all()
+    assert success
+
+def test_layer_cs():
+    """All the needed parameters were specified."""
+    l = Layer('nclad', 1.5e-4, np=necessary)
+    for p in necessary:
+        l.set_parameter(p, 1.0)
+    success, _ = l.check_parameters()
+    assert success
+
+def test_layer_cf():
+    """Unspecified necessary parameter is correctly identified."""
+    inp_params = necessary.copy()
+    inp_params.remove('Na')
+    l = Layer('nclad', 1.0e-4, np=necessary)
+    for p in inp_params:
+        l.set_parameter(p, 1.0)
+    s, m = l.check_parameters()
+    success = (not s) and ('Na' in m) and (len(m)==1)
+    assert success
+
+def test_layer_Eg():
+    """Layer.prepare() executes and Eg is correctly defined."""
+    n_params = ['Ec', 'Ev', 'Nd']
+    l = Layer('nclad', 1.5e-4, np=n_params)
+    l.set_parameter('Ec', 1.5)
+    l.set_parameter('Ev', 0)
+    l.set_parameter('Nd', 1e18, 1e16)
+    l.prepare()
+    Eg_calc = l.get_value('Eg', 0.5e-4)
+    Eg_real = 1.5
+    eps = 1e-6
+    success = (np.abs(Eg_calc-Eg_real) < eps)
     assert success
