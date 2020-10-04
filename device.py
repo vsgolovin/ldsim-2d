@@ -215,11 +215,19 @@ class Layer(object):
 
 class Device(object):
 
-    def __init__(self):
+    def __init__(self, nparams):
         """
         Class for storing a collection of `Layer` objects, each corresponding
         to a particular index.
+
+        Parameters
+        ----------
+        nparams : iterable
+            List or tuple of necessary physical parameters (str).
         """
+        assert isinstance(nparams, (list, tuple))
+        assert all([isinstance(p, str) for p in nparams])
+        self.nparams = nparams
         self.layers = dict()
         self.ind_max = -1
         self.ready = False
@@ -243,7 +251,7 @@ class Device(object):
             self.layers[self.ind_max+1] = l
             self.ind_max += 1
         else:
-            self.layer[ind] = l
+            self.layers[ind] = l
             if ind>self.ind_max:
                 self.ind_max = ind
         self.ready = False
@@ -260,7 +268,7 @@ class Device(object):
         i = 1
         for ind in self.inds:
             l = self.layers[ind]
-            l.prepare()
+            l.prepare(self.nparams)
             dx = l.get_thickness()
             self.x_b[i] = self.x_b[i-1] + dx
             i += 1
@@ -359,4 +367,38 @@ def test_layer_Eg():
     Eg_real = 1.5
     eps = 1e-6
     success = (np.abs(Eg_calc-Eg_real) < eps)
+    assert success
+
+def test_device():
+    """
+    Testing if doping profile is correctly evaluated in
+    a two-layer device.
+    """
+    # creating layers
+    l1 = Layer('n', 1e-4)
+    l1.set_parameter('Nd', 1e18)
+    l1.set_parameter('Na', 2e17)
+    l2 = Layer('p', 2e-4)
+    l2.set_parameter('Nd', 4e17, 2e17)
+    l2.set_parameter('Na', 9e17)
+
+    # assembling device
+    n_params = ['Nd', 'Na']
+    d = Device(n_params)
+    d.add_layer(l2, 1)
+    d.add_layer(l1, 0)
+    d.prepare()
+
+    # checking Cdop in the first layer
+    C1 = d.get_value('C_dop', 0.8e-4)
+    C1_real = 1e18 - 2e17
+    eps = 1e-6
+    eq1 = np.abs((C1-C1_real)/C1_real) < eps
+
+    # checking Cdop in the second layer
+    C2 = d.get_value('C_dop', 1e-4+2e-4/2)
+    C2_real = 3e17-9e17
+    eq2 = np.abs((C2-C2_real)/C2_real) < eps
+
+    success = (eq1 and eq2)
     assert success
