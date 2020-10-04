@@ -77,7 +77,7 @@ class PhysParam(object):
 
 class Layer(object):
 
-    def __init__(self, name, dx, np=necessary):
+    def __init__(self, name, dx):
         """
         Class for storing a collection of `PhysParam` objects.
 
@@ -87,8 +87,6 @@ class Layer(object):
             Layer name.
         dx : number
             Layer thickness (cm).
-        np : iterable
-            All the necessary physical parameters` names (str).
         """
         assert isinstance(name, str)
         self.name = name
@@ -97,7 +95,6 @@ class Layer(object):
 
         # storing necessary (n) parameters` names in a list
         # and creating a dictionary for storing PhysParam objects
-        self.n_params = np
         self.params = dict()  # dictionary of parameters
 
     # getters
@@ -137,9 +134,14 @@ class Layer(object):
         param = PhysParam(name=p, dx=self.dx, y1=y1, y2=y2, y_fun=y_fun)
         self.params[p] = param
 
-    def check_parameters(self):
+    def check_parameters(self, nparams):
         """
         Check if all the necessary input parameters were specified.
+
+        Parameters
+        ----------
+        nparams : iterable
+            List or tuple of necessary physical parameters (str).
 
         Returns
         -------
@@ -150,15 +152,20 @@ class Layer(object):
         """
         success = True
         missing = list()
-        for s in self.n_params:
+        for s in nparams:
             if s not in self.params.keys():
                 success = False
                 missing.append(s)
         return success, missing
 
-    def prepare(self):
+    def prepare(self, nparams):
         """
         Make sure all the needed parameters are specified or calculated.
+
+        Parameters
+        ----------
+        nparams : iterable
+            List or tuple of necessary physical parameters (str).
 
         Raises
         ------
@@ -166,7 +173,7 @@ class Layer(object):
             If some necessary input parameters were not specified.
         """
         # checking necessary physical parameters
-        success, missing = self.check_parameters()
+        success, missing = self.check_parameters(nparams)
         if not success:
             msg_1 = 'Layer '+self.name+': '
             msg_3 = 'not specified'
@@ -323,31 +330,31 @@ def test_physparam_yfun():
 
 def test_layer_cs():
     """All the needed parameters were specified."""
-    l = Layer('nclad', 1.5e-4, np=necessary)
+    l = Layer('nclad', 1.5e-4)
     for p in necessary:
         l.set_parameter(p, 1.0)
-    success, _ = l.check_parameters()
+    success, _ = l.check_parameters(necessary)
     assert success
 
 def test_layer_cf():
     """Unspecified necessary parameter is correctly identified."""
     inp_params = necessary.copy()
     inp_params.remove('Na')
-    l = Layer('nclad', 1.0e-4, np=necessary)
+    l = Layer('nclad', 1.0e-4)
     for p in inp_params:
         l.set_parameter(p, 1.0)
-    s, m = l.check_parameters()
+    s, m = l.check_parameters(necessary)
     success = (not s) and ('Na' in m) and (len(m)==1)
     assert success
 
 def test_layer_Eg():
     """Layer.prepare() executes and Eg is correctly defined."""
     n_params = ['Ec', 'Ev', 'Nd']
-    l = Layer('nclad', 1.5e-4, np=n_params)
+    l = Layer('nclad', 1.5e-4)
     l.set_parameter('Ec', 1.5)
     l.set_parameter('Ev', 0)
     l.set_parameter('Nd', 1e18, 1e16)
-    l.prepare()
+    l.prepare(n_params)
     Eg_calc = l.get_value('Eg', 0.5e-4)
     Eg_real = 1.5
     eps = 1e-6
