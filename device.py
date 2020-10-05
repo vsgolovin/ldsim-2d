@@ -93,8 +93,7 @@ class Layer(object):
         assert isinstance(dx, (float, int))
         self.dx = float(dx)
 
-        # storing necessary (n) parameters` names in a list
-        # and creating a dictionary for storing PhysParam objects
+        # creating a dictionary for storing PhysParam objects
         self.params = dict()  # dictionary of parameters
 
     # getters
@@ -215,19 +214,19 @@ class Layer(object):
 
 class Device(object):
 
-    def __init__(self, nparams):
+    def __init__(self, params):
         """
         Class for storing a collection of `Layer` objects, each corresponding
         to a particular index.
 
         Parameters
         ----------
-        nparams : iterable
+        params : iterable
             List or tuple of necessary physical parameters (str).
         """
-        assert isinstance(nparams, (list, tuple))
-        assert all([isinstance(p, str) for p in nparams])
-        self.nparams = nparams
+        assert isinstance(params, (list, tuple))
+        assert all([isinstance(p, str) for p in params])
+        self.params = params
         self.layers = dict()
         self.ind_max = -1
         self.ready = False
@@ -268,11 +267,29 @@ class Device(object):
         i = 1
         for ind in self.inds:
             l = self.layers[ind]
-            l.prepare(self.nparams)
+            l.prepare(self.params)
             dx = l.get_thickness()
             self.x_b[i] = self.x_b[i-1] + dx
             i += 1
         self.ready = True
+
+    def get_thickness(self):
+        """
+        Get total device thickness.
+        """
+        if self.ready:  # already calculated boundaries
+            return self.x_b[-1]
+        else:  # calculate by adding up layers' thicknesses
+            width = 0
+            for l in self.layers.values():
+                width += l.get_thickness()
+            return width
+
+    def get_params(self):
+        """
+        Get all the necessary physical parameters' names.
+        """
+        return self.params
 
     def get_value(self, p, x):
         """
@@ -359,12 +376,12 @@ def test_layer_Eg():
     """Layer.prepare() executes and Eg is correctly defined."""
     n_params = ['Ec', 'Ev', 'Nd']
     l = Layer('nclad', 1.5e-4)
-    l.set_parameter('Ec', 1.5)
-    l.set_parameter('Ev', 0)
+    l.set_parameter('Ec', 1.7)
+    l.set_parameter('Ev', 0.2)
     l.set_parameter('Nd', 1e18, 1e16)
     l.prepare(n_params)
     Eg_calc = l.get_value('Eg', 0.5e-4)
-    Eg_real = 1.5
+    Eg_real = 1.7-0.2
     eps = 1e-6
     success = (np.abs(Eg_calc-Eg_real) < eps)
     assert success
@@ -401,4 +418,33 @@ def test_device():
     eq2 = np.abs((C2-C2_real)/C2_real) < eps
 
     success = (eq1 and eq2)
+    assert success
+
+def test_device_thickness():
+    """
+    Testing the Device.get_thickness() method.
+    """
+    # creating layers
+    n_params = ['Ec', 'Ev']
+    l1 = Layer('AlGaAs', 1.5e-4)
+    l1.set_parameter('Ev', 0)
+    l1.set_parameter('Ec', 1.8)
+    l2 = Layer('GaAs', 1e-4)
+    l2.set_parameter('Ev', 0.2)
+    l2.set_parameter('Ec', 1.6)
+
+    # assembling device and calculating for both cases
+    d = Device(n_params)
+    d.add_layer(l1)
+    d.add_layer(l2)
+    x1 = d.get_thickness()
+    d.prepare()
+    x2 = d.get_thickness()
+
+    # checking values
+    eps = 1e-6
+    x_real = 1.5e-4+1e-4
+    eq1 = np.abs((x1-x_real)/x_real) < eps
+    eq2 = np.abs((x2-x_real)/x_real) < eps
+    success = eq1 and eq2
     assert success
