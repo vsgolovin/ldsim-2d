@@ -152,5 +152,7 @@ if __name__ == '__main__':
     plt.figure()
     plt.plot(x, Ec, 'k-', lw=1.0)
     plt.plot(x, Ev, 'k-', lw=1.0)
+    plt.xlabel('$x$ (cm)')
+    plt.ylabel('$E$ (eV)')
     plt.twinx()
     plt.plot(x, mu_p, 'b:x', ms=4, lw=1.0)
