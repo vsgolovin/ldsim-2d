@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Mon Oct  5 12:15:34 2020
@@ -129,10 +128,10 @@ class DiodeData(object):
             smoothing the parameter change function. Roughly describes the size
             of area that is used to choose the local grid step.
         y0 : number or None
-            The 'external' value of parameter 'param_grid' at x<0. Does not any
-            physical meaning, added in order to reduce the grid step at the
-            boundary. `None` means there is no discontinuity in `param_grid` at
-            x=0.
+            The 'external' value of parameter 'param_grid' at x<0. Does not
+            have any physical meaning, added in order to reduce the grid step
+            at the boundary. `None` means there is no discontinuity in
+            `param_grid` at x=0.
         yn : number or None
             `y0` analogue for the second boundary (x>x_max).
         """
