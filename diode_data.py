@@ -8,10 +8,18 @@ Created on Mon Oct  5 12:15:34 2020
 
 import numpy as np
 from scipy.interpolate import interp1d
+import units
+import constants as const
 
 # DiodeData-specific necessary input parameters
 input_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
                 'tau_p', 'B', 'Cn', 'Cp', 'eps']
+unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
+               'Na':units.n, 'Cdop':units.n, 'Nc':units.n, 'Nv':units.n,
+               'mu_n':units.mu, 'mu_p':units.mu, 'tau_n':units.t,
+               'tau_p':units.t, 'B':1/(units.n*units.t), 
+               'Cn':1/(units.n**2*units.t), 'Cp':1/(units.n**2*units.t),
+               'eps':1}
 
 class DiodeData(object):
 
@@ -81,6 +89,15 @@ class DiodeData(object):
             xi += step_min + (step_max-step_min)*(1-fg_fun(xi))
         self.x = np.array(new_grid)
 
+    def _calculate_cofficients(self):
+        "Calculate rhs coefficients for current continuity and Poisson eqs."
+        if self.is_nondimensional:
+            self.k_cont = const.q*units.n*units.x / (units.t*units.j)
+            self.k_pois = const.q*units.n*units.x**2 / (const.eps_0*units.V)
+        else:
+            self.k_cont = const.q
+            self.k_pois = const.q / const.eps_0
+
     def __init__(self, device, step=1e-7, uniform=False, **options):
         """
         Class for storing arrays of all the necessary parameters' values.
@@ -139,11 +156,34 @@ class DiodeData(object):
         self.values['Eg'] = self.values['Ec'] - self.values['Ev']
         self.values['Cdop'] = self.values['Nd'] - self.values['Na']
 
+        # tracking measurement units and calculating rhs coefficients
+        self.is_nondimensional = False
+        self._calculate_cofficients()
+
+    def make_nondimensional(self):
+        "Make every parameter dimensionless."
+        assert not self.is_nondimensional
+        self.x /= units.x
+        for key in unit_values:
+            self.values[key] /= unit_values[key]
+        self.is_nondimensional = True
+        self._calculate_cofficients()
+
+    def original_units(self):
+        "Return from dimensionless to original units."
+        assert self.is_nondimensional
+        self.x *= units.x
+        for key in unit_values:
+            self.values[key] *= unit_values[key]
+        self.is_nondimensional = False
+        self._calculate_cofficients()
+
 if __name__ == '__main__':
     from sample_device import sd
     import matplotlib.pyplot as plt
 
     dd = DiodeData(sd)
+    dd.make_nondimensional()
     x = dd.x
     Ec = dd.values['Ec']
     Ev = dd.values['Ev']
@@ -152,7 +192,7 @@ if __name__ == '__main__':
     plt.figure()
     plt.plot(x, Ec, 'k-', lw=1.0)
     plt.plot(x, Ev, 'k-', lw=1.0)
-    plt.xlabel('$x$ (cm)')
-    plt.ylabel('$E$ (eV)')
+    plt.xlabel('$x$')
+    plt.ylabel('$E$')
     plt.twinx()
     plt.plot(x, mu_p, 'b:x', ms=4, lw=1.0)

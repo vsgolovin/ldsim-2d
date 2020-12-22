@@ -13,5 +13,4 @@ E = const.kb*const.T
 n = 2e7
 mu = 100
 j = const.q*mu*n*V/x
-R = mu*n*V/x**2
-gamma = const.q*n*x**2 / (const.eps_0*V)
+t = 1e-9
