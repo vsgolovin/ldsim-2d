@@ -14,7 +14,7 @@ import constants as const
 input_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
                 'tau_p', 'B', 'Cn', 'Cp', 'eps']
 unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
-               'Na':units.n, 'Cdop':units.n, 'Nc':units.n, 'Nv':units.n,
+               'Na':units.n, 'C_dop':units.n, 'Nc':units.n, 'Nv':units.n,
                'mu_n':units.mu, 'mu_p':units.mu, 'tau_n':units.t,
                'tau_p':units.t, 'B':1/(units.n*units.t), 
                'Cn':1/(units.n**2*units.t), 'Cp':1/(units.n**2*units.t),
@@ -143,6 +143,8 @@ class DiodeData(object):
         self._gen_uni_mesh(device, step)
         if not uniform:
             self._gen_nonuni_mesh(device, **options)
+        # mesh is stored in self.x
+        self.xm = (self.x[1:]+self.x[:-1])/2  # midpoints
 
         # calculating physical parameters' values at mesh nodes
         self.values = dict()
@@ -153,18 +155,21 @@ class DiodeData(object):
                 self.values[p][i] = device.get_value(p, xi)
         # additional parameters
         self.values['Eg'] = self.values['Ec'] - self.values['Ev']
-        self.values['Cdop'] = self.values['Nd'] - self.values['Na']
+        self.values['C_dop'] = self.values['Nd'] - self.values['Na']
 
         # tracking measurement units and calculating rhs coefficients
         self.is_nondimensional = False
+        self.Vt = const.kb*const.T
         self._calculate_cofficients()
 
     def make_nondimensional(self):
         "Make every parameter dimensionless."
         assert not self.is_nondimensional
         self.x /= units.x
+        self.xm /= units.x
         for key in unit_values:
             self.values[key] /= unit_values[key]
+        self.Vt /= units.E
         self.is_nondimensional = True
         self._calculate_cofficients()
 
@@ -172,8 +177,10 @@ class DiodeData(object):
         "Return from dimensionless to original units."
         assert self.is_nondimensional
         self.x *= units.x
+        self.xm *= units.x
         for key in unit_values:
             self.values[key] *= unit_values[key]
+        self.Vt *= units.E
         self.is_nondimensional = False
         self._calculate_cofficients()
 

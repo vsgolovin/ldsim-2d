@@ -6,15 +6,23 @@ calculation.
 """
 
 import numpy as np
-from fdint import fdk
+from fdint import fdk, dfdk
 
-def fermi(nu):
+def fermi_fdint(nu):
     """
-    Fermi-Dirac integral of order 1/2, uses `fdint` package.
+    Fermi-Dirac integral of order 1/2 calculated using `fdint` package.
     """
     F = fdk(k=0.5, phi=nu)
     F *= 2/np.sqrt(np.pi)
     return F
+
+def fermi_dot_fdint(nu):
+    """
+    Derivative of Fermi-Dirac integral of order 1/2 calculated using `fdint`.
+    """
+    Fdot = dfdk(k=0.5, phi=nu)
+    Fdot *= 2/np.sqrt(np.pi)
+    return Fdot
 
 def fermi_approx(nu):
     """
@@ -42,4 +50,3 @@ def boltzmann(nu):
     """
     F = np.exp(nu)
     return F
-
