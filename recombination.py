@@ -28,7 +28,7 @@ def srh_derivative(n, ndot, p, pdot, n1, p1, tau_n, tau_p):
 
 def srh_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n1, p1, tau_n, tau_p):
     """
-    Shockley-Read-Hall recombination rate with respect to potential.
+    Shockley-Read-Hall recombination rate derivative with respect to potential.
     """
     n = cc.n(psi, phi_n, Nc, Ec, Vt)
     ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
@@ -39,7 +39,8 @@ def srh_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n1, p1, tau_n, tau_p):
 
 def srh_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n1, p1, tau_n, tau_p):
     """
-    Shockley-Read-Hall recombination rate with respect to potential.
+    Shockley-Read-Hall recombination rate derivative with respect to electron
+    quasi Fermi potential.
     """
     n = cc.n(psi, phi_n, Nc, Ec, Vt)
     ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
@@ -50,7 +51,7 @@ def srh_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n1, p1, tau_n, tau_p):
 
 def srh_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n1, p1, tau_n, tau_p):
     """
-    Shockley-Read-Hall recombination rate with respect to electron quasi Fermi
+    Shockley-Read-Hall recombination rate with respect to hole quasi Fermi
     potential.
     """
     n = cc.n(psi, phi_n, Nc, Ec, Vt)
@@ -69,17 +70,47 @@ def rad_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
     R = B*(n*p-n0*p0)
     return R
 
+def rad_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
+    """
+    Radiative recombination rate derivative with respect to potential.
+    """
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
+    Rdot = B*(n*pdot+p*ndot)
+    return Rdot
+
+def rad_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
+    """
+    Radiative recombination rate derivative with respect to electron quasi
+    Fermi potential.
+    """
+    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    Rdot = B*p*ndot
+    return Rdot
+
+def rad_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
+    """
+    Radiative recombination rate derivative with respect to hole quasi Fermi
+    potential.
+    """
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
+    Rdot = B*n*pdot
+    return Rdot
+
 def auger_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
     """
     Auger recombination rate.
     """
     n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, pni_p, Nv, Ev, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
     R = (Cn*n+Cp*p) * (n*p-n0*p0)
     return R
 
 # testing
-from numpy.random import rand
 test_err = 1e-3
 
 def test_srh_derivatives():
@@ -125,4 +156,46 @@ def test_srh_derivatives():
 
     # checking results
     assert err_psi < test_err and err_phin < test_err and err_phip < test_err
-    
+
+def test_rad_derivatives():
+    psi = 24
+    phi_n = 20
+    phi_p = 19
+    Nc = 2.4e10
+    Nv = 45e10
+    Ec = 55
+    Ev = -1
+    Vt = 1.4
+    n0 = 1e6
+    p0 = 4e6
+    B = 1e-10
+
+    # psi
+    psi_1 = psi*0.999
+    psi_2 = psi*1.001
+    R1 = rad_R(psi_1, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    R2 = rad_R(psi_2, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    Rdot_fd = (R2-R1)/(psi_2-psi_1)
+    Rdot = rad_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    err_psi = abs(1-Rdot/Rdot_fd)
+
+    # phi_n
+    phi_n1 = phi_n*0.999
+    phi_n2 = phi_n*1.001
+    R1 = rad_R(psi, phi_n1, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    R2 = rad_R(psi, phi_n2, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    Rdot_fd = (R2-R1)/(phi_n2-phi_n1)
+    Rdot = rad_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    err_phin = abs(1-Rdot/Rdot_fd)
+
+    # phi_p
+    phi_p1 = phi_p*0.999
+    phi_p2 = phi_p*1.001
+    R1 = rad_R(psi, phi_n, phi_p1, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    R2 = rad_R(psi, phi_n, phi_p2, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    Rdot_fd = (R2-R1)/(phi_p2-phi_p1)
+    Rdot = rad_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
+    err_phip = abs(1-Rdot/Rdot_fd)
+
+    # checking results
+    assert err_psi < test_err and err_phin < test_err and err_phip < test_err
