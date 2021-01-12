@@ -88,15 +88,6 @@ class DiodeData(object):
             xi += step_min + (step_max-step_min)*(1-fg_fun(xi))
         self.x = np.array(new_grid)
 
-    def _calculate_cofficients(self):
-        "Calculate rhs coefficients for current continuity and Poisson eqs."
-        if self.is_nondimensional:
-            self.k_cont = const.q*units.n*units.x / (units.t*units.j)
-            self.k_pois = const.q*units.n*units.x**2 / (const.eps_0*units.V)
-        else:
-            self.k_cont = const.q
-            self.k_pois = const.q / const.eps_0
-
     def __init__(self, device, step=1e-7, uniform=False, **options):
         """
         Class for storing arrays of all the necessary parameters' values.
@@ -157,10 +148,11 @@ class DiodeData(object):
         self.values['Eg'] = self.values['Ec'] - self.values['Ev']
         self.values['C_dop'] = self.values['Nd'] - self.values['Na']
 
-        # tracking measurement units and calculating rhs coefficients
+        # tracking measurement units and storing constants
         self.is_nondimensional = False
         self.Vt = const.kb*const.T
-        self._calculate_cofficients()
+        self.q = const.q
+        self.eps_0 = const.eps_0
 
     def make_nondimensional(self):
         "Make every parameter dimensionless."
@@ -170,8 +162,9 @@ class DiodeData(object):
         for key in unit_values:
             self.values[key] /= unit_values[key]
         self.Vt /= units.E
+        self.q /= units.q
+        self.eps_0 = 1.0
         self.is_nondimensional = True
-        self._calculate_cofficients()
 
     def original_units(self):
         "Return from dimensionless to original units."
@@ -181,8 +174,9 @@ class DiodeData(object):
         for key in unit_values:
             self.values[key] *= unit_values[key]
         self.Vt *= units.E
+        self.q *= units.q
+        self.eps_0 = const.eps_0
         self.is_nondimensional = False
-        self._calculate_cofficients()
 
 if __name__ == '__main__':
     from sample_device import sd

@@ -78,7 +78,7 @@ def psibi_initial_guess(dd, n_iter=20, lam=1.0, adj_max=1e-6):
                         adj_max=adj_max)
     return psi
 
-def poisson_res(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt):
+def poisson_res(psi, x, xm, eps, eps_0, q, C_dop, Nc, Nv, Ec, Ev, Vt):
     """
     Calculate residual of Poisson's equation at equilibrium.
     """
@@ -88,11 +88,11 @@ def poisson_res(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt):
     lhs = eps[1:-1] * (  1/h[1:  ]          *psi[2:  ]
                        -(1/h[1:  ]+1/h[:-1])*psi[1:-1]
                        + 1/h[ :-1]          *psi[ :-2] )
-    rhs = k * (C_dop[1:-1]-n[1:-1]+p[1:-1]) * (xm[1:]-xm[:-1])
+    rhs = q/eps_0 * (C_dop[1:-1]-n[1:-1]+p[1:-1]) * (xm[1:]-xm[:-1])
     r = lhs+rhs
     return r
 
-def poisson_jac(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt):
+def poisson_jac(psi, x, xm, eps, eps_0, q, C_dop, Nc, Nv, Ec, Ev, Vt):
     """
     Calculate Jacobian of Poisson's equation at equilibrium.
     """
@@ -102,7 +102,8 @@ def poisson_jac(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt):
     pdot = cc.dp_dpsi(psi, 0, Nv, Ev, Vt)
     J = np.zeros((3, m-2))
     J[0, 1:  ] =  eps[1:-2]/h[1:-1]
-    J[1,  :  ] = -eps[1:-1]*(1/h[1:]+1/h[:-1]) + k*(-ndot[1:-1]+pdot[1:-1])
+    J[1,  :  ] = -eps[1:-1]*(1/h[1:]+1/h[:-1]) \
+                 +q/eps_0*(-ndot[1:-1]+pdot[1:-1])
     J[2,  :-1] =  eps[2:-1]/h[1:-1]
     return J
 
@@ -142,7 +143,8 @@ def psibi_solve(dd, psi_init, n_iter=3000, lam=1.0, delta_max=1e-6,
     # unpacking DiodeData object
     x = dd.x    # grid
     xm = dd.xm  # grid midpoints
-    k = dd.k_pois  # coefficient for rhs of Poisson's equation
+    q = dd.q    # elementary charge
+    eps_0 = dd.eps_0        # vacuum permittivity
     eps = dd.values['eps']  # relative dielectric permittivity
     Nc = dd.values['Nc']    # effective density of states in conduction band
     Nv = dd.values['Nv']    # effective density of states in valence band
@@ -155,8 +157,8 @@ def psibi_solve(dd, psi_init, n_iter=3000, lam=1.0, delta_max=1e-6,
 
     # Newton's method
     for i in range(n_iter):
-        A = poisson_jac(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt)
-        b = poisson_res(psi, x, xm, eps, k, C_dop, Nc, Nv, Ec, Ev, Vt)
+        A = poisson_jac(psi, x, xm, eps, eps_0, q, C_dop, Nc, Nv, Ec, Ev, Vt)
+        b = poisson_res(psi, x, xm, eps, eps_0, q, C_dop, Nc, Nv, Ec, Ev, Vt)
         dpsi = solve_banded((1, 1), A, -b)
         delta[i] = np.sum(np.abs(dpsi/psi[1:-1])) / (len(x)-2)
         psi[1:-1] += lam*dpsi
