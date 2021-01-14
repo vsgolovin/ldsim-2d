@@ -112,50 +112,33 @@ def SG_djp_dphip2(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
     return jdot
 
 
-#%% Modified Scharfetter-Gummel schemes
-def SGBC_jn(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    """
-    Modified Scharfetter-Gummel formula for electron current density with
-    diffusion enhancement factor introduced by Bessemoulin-Chatard.
-    """
-    nu_1 = (psi_1-phi_n1-Ec) / Vt
-    nu_2 = (psi_2-phi_n2-Ec) / Vt
-    F1 = sdf.fermi_fdint(nu_1)
-    F2 = sdf.fermi_fdint(nu_2)
-    g = (nu_1-nu_2) / (np.log(F1)-np.log(F2))
-    B = bernoulli
-    j = -q*mu_n*Vt / (x2-x1) * g * ( Nc*F1*B(-(psi_2-psi_1)/(Vt*g))
-                                    -Nc*F2*B(+(psi_2-psi_1)/(Vt*g)) )
-    return j
-
-def SGBC_jp(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
-    """
-    Modified Scharfetter-Gummel formula for hole current density with
-    diffusion enhancement factor introduced by Bessemoulin-Chatard.
-    """
-    nu_1 = (-psi_1+phi_p1+Ev) / Vt
-    nu_2 = (-psi_2+phi_p2+Ev) / Vt
-    F1 = sdf.fermi_fdint(nu_1)
-    F2 = sdf.fermi_fdint(nu_2)
-    g = (nu_1-nu_2) / (np.log(F1)-np.log(F2))
-    B = bernoulli
-    j = q*mu_p*Vt / (x2-x1) * g * ( Nv*F1*B(+(psi_2-psi_1)/(Vt*g))
-                                   -Nv*F2*B(-(psi_2-psi_1)/(Vt*g)) )
-    return j
-
-def SGWIAS_jn(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    nu_1 = (psi_1-phi_n1-Ec) / Vt
-    nu_2 = (psi_2-phi_n2-Ec) / Vt
+#%% Modified Scharfetter-Gummel scheme
+def mSG_g(nu_1, nu_2):
+    "Diffusion enhancement factor."
     F = sdf.fermi_fdint
-    g = np.sqrt((F(nu_1)*F(nu_2)) / (np.exp(nu_1)*np.exp(nu_2)))
+    g = np.sqrt( (F(nu_1)*F(nu_2)) / (np.exp(nu_1)*np.exp(nu_2)) )
+    return g
+
+def mSG_gdot(nu_1, nu_2):
+    "Diffusion enhancement factor derivative with respect to nu_1."
+    F = sdf.fermi_fdint
+    Fdot = sdf.fermi_dot_fdint
+    gdot = mSG_g(nu_1, nu_2)/2 * (Fdot(nu_1)/F(nu_1) - 1)
+    return gdot
+
+def mSG_jn(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
+    "Electron current density."
+    nu_1 = (psi_1-phi_n1-Ec) / Vt
+    nu_2 = (psi_2-phi_n2-Ec) / Vt
+    g = mSG_g(nu_1, nu_2)
     j = g*SG_jn(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n)
     return j
 
-def SGWIAS_jp(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
+def mSG_jp(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
+    "Hole current density."
     nu_1 = (-psi_1+phi_p1+Ev) / Vt
     nu_2 = (-psi_2+phi_p2+Ev) / Vt
-    F = sdf.fermi_fdint
-    g = np.sqrt((F(nu_1)*F(nu_2)) / (np.exp(nu_1)*np.exp(nu_2)))
+    g = mSG_g(nu_1, nu_2)
     j = g*SG_jp(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p)
     return j
 
