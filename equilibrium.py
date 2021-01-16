@@ -164,7 +164,7 @@ def psibi_solve(dd, psi_init, n_iter=3000, lam=1.0, delta_max=1e-6,
         psi[1:-1] += lam*dpsi
 
     # checking if last step was small
-    assert (delta[-1]<delta_max).all()
+    assert delta[-1]<delta_max
 
     # returning results
     if return_delta:

@@ -8,7 +8,7 @@ Created on Tue Sep 29 16:24:15 2020
 import numpy as np
 
 necessary = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n' 'mu_p', 'tau_n',
-             'tau_p' 'B', 'Cn', 'Cp', 'eps']
+             'tau_p', 'B', 'Cn', 'Cp', 'eps']
 
 class PhysParam(object):
 

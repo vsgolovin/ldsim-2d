@@ -409,7 +409,6 @@ def test_mSG_jp_derivatives():
     jp_dot_fd = (jp_2-jp_1) / (psi_1_2-psi_1_1)
     jp_dot = mSG_djp_dpsi1(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p)
     err_psi1 = abs(1-jp_dot/jp_dot_fd)
-    print(jp_dot_fd, jp_dot)
 
     # psi_2
     psi_2_1 = psi_2*0.999
@@ -419,7 +418,6 @@ def test_mSG_jp_derivatives():
     jp_dot_fd = (jp_2-jp_1) / (psi_2_2-psi_2_1)
     jp_dot = mSG_djp_dpsi2(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p)
     err_psi2 = abs(1-jp_dot/jp_dot_fd)
-    print(jp_dot_fd, jp_dot)
 
     # phi_p1
     phi_p1_1 = phi_p1*0.999
@@ -429,7 +427,6 @@ def test_mSG_jp_derivatives():
     jp_dot_fd = (jp_2-jp_1) / (phi_p1_2-phi_p1_1)
     jp_dot = mSG_djp_dphip1(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p)
     err_phip1 = abs(1-jp_dot/jp_dot_fd)
-    print(jp_dot_fd, jp_dot)
 
     # phi_p2
     phi_p2_1 = phi_p2*0.999
@@ -439,7 +436,6 @@ def test_mSG_jp_derivatives():
     jp_dot_fd = (jp_2-jp_1) / (phi_p2_2-phi_p2_1)
     jp_dot = mSG_djp_dphip2(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p)
     err_phip2 = abs(1-jp_dot/jp_dot_fd)
-    print(jp_dot_fd, jp_dot)
-   
+
     assert (np.array([err_psi1, err_psi2, err_phip1, err_phip2]) < test_err).all()
 
