@@ -12,6 +12,7 @@ import units
 import constants as const
 import equilibrium as eq
 import carrier_concentrations as cc
+import vrs
 
 # DiodeData-specific necessary input parameters
 input_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
@@ -139,7 +140,7 @@ class DiodeData(object):
         # creating 1D mesh
         print("Generating uniform mesh...", end=' ')
         self._gen_uni_mesh(device, step)
-        print("comlete (%d nodes)"%(len(self.x),))
+        print("complete (%d nodes)"%(len(self.x),))
         if not uniform:
             print("Generating non-uniform mesh...", end=' ')
             self._gen_nonuni_mesh(device, **options)
@@ -217,7 +218,7 @@ class DiodeData(object):
 
         self.is_nondimensional = False
 
-    def solve_lcn(self, n_iter=20, lam=1.0, delta_max=1e-6):
+    def solve_lcn(self, n_iter=20, lam=1.0, delta_max=1e-8):
         "Find built-in potential assuming local charge neutrality."
         C_dop = self.values['C_dop']
         Nc = self.values['Nc']
@@ -249,14 +250,14 @@ class DiodeData(object):
         psi = self.values['psi_lcn'].copy()
 
         # Newton's method
-        self.delta = np.zeros(n_iter)  # mean relative change in psi
+        self.delta = np.zeros(n_iter)  # change in psi
         for i in range(n_iter):
             A = eq.poisson_jac(psi, x, xm, eps, eps_0, q,
                                C_dop, Nc, Nv, Ec, Ev, Vt)
             b = eq.poisson_res(psi, x, xm, eps, eps_0, q,
                                C_dop, Nc, Nv, Ec, Ev, Vt)
             dpsi = solve_banded((1, 1), A, -b)
-            self.delta[i] = np.sum(np.abs(dpsi/psi[1:-1])) / (len(x)-2)
+            self.delta[i] = np.mean(np.abs(dpsi))
             psi[1:-1] += lam*dpsi
 
         # storing solution and equilibrium concentrations
