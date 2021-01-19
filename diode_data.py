@@ -12,7 +12,6 @@ import units
 import constants as const
 import equilibrium as eq
 import carrier_concentrations as cc
-import vrs
 
 # DiodeData-specific necessary input parameters
 input_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',

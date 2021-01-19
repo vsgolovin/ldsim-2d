@@ -501,8 +501,8 @@ if __name__ == '__main__':
     m = len(psi)-2
 
     # new boundary conditions
-    U1 = 1
-    U2 = -1
+    U1 = -2
+    U2 = 2
     psi[0] += U1
     psi[-1] += U2
     phi_n[0] = U1
@@ -511,7 +511,7 @@ if __name__ == '__main__':
     phi_p[-1] = U2
 
     # Newton's method
-    niter = 1000
+    niter = 2000
     lam = 1e-1
     delta = np.zeros(niter)
     for i in range(niter):
@@ -533,7 +533,7 @@ if __name__ == '__main__':
     plt.figure('Band diagram')
     plt.plot(dd.x, dd.values['Ec']-psi, 'k-', lw=1.0)
     plt.plot(dd.x, dd.values['Ev']-psi, 'k-', lw=1.0)
-    plt.plot(dd.x, phi_n, 'b-', lw=0.5)
-    plt.plot(dd.x, phi_p, 'r-', lw=0.5)
+    plt.plot(dd.x, -phi_n, 'b-', lw=0.5)
+    plt.plot(dd.x, -phi_p, 'r-', lw=0.5)
     plt.xlabel('$x$')
     plt.ylabel('$E$')
