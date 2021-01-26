@@ -1,15 +1,10 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Nov 26 19:28:24 2020
-
-@author: vs_golovin
+A sample diode structure.
 """
 
 from device import Layer, Device
-
-params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
-             'tau_p', 'B', 'Cn', 'Cp', 'eps']
+from diode_data import input_params as diode_params
 
 # GaAs n-contact
 l1 = Layer('n-cont', 0.3e-4)
@@ -130,7 +125,7 @@ l7.set_parameter('Cn', 2e-30)
 l7.set_parameter('Cp', 2e-30)
 l7.set_parameter('eps', 12.9)
 
-sd = Device(params=params)
+sd = Device(params=diode_params)
 for l in [l1, l2, l3, l4, l5, l6, l7]:
     sd.add_layer(l)
 sd.prepare()

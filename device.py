@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Sep 29 16:24:15 2020
-
-@author: vsgolovin
+Tools for setting up the problem. Class `Device` is used to define values of
+all the the input parameters (doping densities, energy band boundaries, carrier
+mobilities, etc.) at every point of the 1D device.
 """
 
 import numpy as np
-
-necessary = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n' 'mu_p', 'tau_n',
-             'tau_p', 'B', 'Cn', 'Cp', 'eps']
 
 class PhysParam(object):
 
@@ -184,19 +181,6 @@ class Layer(object):
             msg = msg_1+msg_2+msg_3
             raise Exception(msg)
 
-        # calculating some useful parameters
-        # doping profile C_dop = Nd - Na
-        if ('Nd' in self.params) and ('Na' in self.params):
-            f = lambda x: ( self.params['Nd'].get_value(x)
-                           -self.params['Na'].get_value(x))
-            self.set_parameter('C_dop', y_fun=f)
-
-        # bandgap Eg = Ec - Ev
-        if ('Ec' in self.params) and ('Ev' in self.params):
-            f = lambda x: ( self.params['Ec'].get_value(x)
-                           -self.params['Ev'].get_value(x))
-            self.set_parameter('Eg', y1=None, y2=None, y_fun=f)
-
     def get_value(self, p, x):
         """
         Get value of the physical parameter `p` at location `x`.
@@ -355,6 +339,7 @@ def test_physparam_yfun():
 
 def test_layer_cs():
     """All the needed parameters were specified."""
+    necessary = ['Ec', 'Ev', 'Nc', 'Nv', 'foo', 'bar']
     l = Layer('nclad', 1.5e-4)
     for p in necessary:
         l.set_parameter(p, 1.0)
@@ -363,27 +348,14 @@ def test_layer_cs():
 
 def test_layer_cf():
     """Unspecified necessary parameter is correctly identified."""
+    necessary = ['Ec', 'Ev', 'Nc', 'Nv', 'foo', 'bar']
     inp_params = necessary.copy()
-    inp_params.remove('Na')
+    inp_params.remove('foo')
     l = Layer('nclad', 1.0e-4)
     for p in inp_params:
         l.set_parameter(p, 1.0)
     s, m = l.check_parameters(necessary)
-    success = (not s) and ('Na' in m) and (len(m)==1)
-    assert success
-
-def test_layer_Eg():
-    """Layer.prepare() executes and Eg is correctly defined."""
-    n_params = ['Ec', 'Ev', 'Nd']
-    l = Layer('nclad', 1.5e-4)
-    l.set_parameter('Ec', 1.7)
-    l.set_parameter('Ev', 0.2)
-    l.set_parameter('Nd', 1e18, 1e16)
-    l.prepare(n_params)
-    Eg_calc = l.get_value('Eg', 0.5e-4)
-    Eg_real = 1.7-0.2
-    eps = 1e-6
-    success = (np.abs(Eg_calc-Eg_real) < eps)
+    success = (not s) and ('foo' in m) and (len(m)==1)
     assert success
 
 def test_device():
@@ -396,7 +368,7 @@ def test_device():
     l1.set_parameter('Nd', 1e18)
     l1.set_parameter('Na', 2e17)
     l2 = Layer('p', 2e-4)
-    l2.set_parameter('Nd', 4e17, 2e17)
+    l2.set_parameter('Nd', 4e17)
     l2.set_parameter('Na', 9e17)
 
     # assembling device
@@ -406,18 +378,14 @@ def test_device():
     d.add_layer(l1, 0)
     d.prepare()
 
-    # checking Cdop in the first layer
-    C1 = d.get_value('C_dop', 0.8e-4)
-    C1_real = 1e18 - 2e17
-    eps = 1e-6
-    eq1 = np.abs((C1-C1_real)/C1_real) < eps
-
-    # checking Cdop in the second layer
-    C2 = d.get_value('C_dop', 1e-4+2e-4/2)
-    C2_real = 3e17-9e17
-    eq2 = np.abs((C2-C2_real)/C2_real) < eps
-
-    success = (eq1 and eq2)
+    # calculating and checking doping profile
+    x = np.array([0, 0.5e-4, 0.99e-4, 1.01e-4, 2e-4, 3e-4])
+    Cdop_real = np.array([1e18-2e17]*3+[4e17-9e17]*3)
+    Nd_calc = np.array([d.get_value('Nd', xi) for xi in x])
+    Na_calc = np.array([d.get_value('Na', xi) for xi in x])
+    Cdop_calc = Nd_calc - Na_calc
+    err = np.abs((Cdop_calc-Cdop_real)/Cdop_real)
+    success = (err<1e-6).all()
     assert success
 
 def test_device_thickness():

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Oct  5 12:15:34 2020
-
-@author: vsgolovin
+Class for storing all the parameters needed to simulate 1D semiconductor diode
+operation.
 """
 
 import numpy as np
@@ -278,7 +277,7 @@ if __name__ == '__main__':
     mu_p = dd.values['mu_p']
 
     # plotting results
-    plt.figure('Mesh gereration')
+    plt.figure('Mesh generation')
     plt.plot(x, Ec, 'k-', lw=1.0)
     plt.plot(x, Ev, 'k-', lw=1.0)
     plt.xlabel('$x$')
