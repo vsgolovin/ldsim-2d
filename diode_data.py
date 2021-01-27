@@ -284,7 +284,7 @@ if __name__ == '__main__':
     plt.ylabel('$E$')
     plt.twinx()
     plt.plot(x, mu_p, 'b:x', ms=4, lw=1.0)
-    plt.ylabel('$\mu_p$')
+    plt.ylabel('$\mu_p$', color='b')
 
     # solve Poisson's equation
     dd.make_dimensionless()  # does not converge with original units -- error?

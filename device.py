@@ -275,6 +275,40 @@ class Device(object):
         """
         return self.params
 
+    def get_index(self, x, get_xrel=False):
+        """
+        For a given coordinate `x` return index of corresponding layer.
+        Optionally returns location inside the layer.
+
+        Parameters
+        ----------
+        x : number
+            x coordinate inside device.
+        get_xrel : bool, optional
+            Whether to return relative position inside layer.
+
+        """
+        b = self.x_b  # layer boundaries
+        assert x>=b[0] and x<=b[-1]
+        b = b[:-1]
+        n = len(b)
+        ix = 0
+        # bijection search
+        while n>1:
+            n = n//2
+            if x<b[n]:
+                b = b[:n]
+            else:
+                ix += n
+                b = b[n:]
+                n = len(b)
+
+        ind = self.inds[ix]
+        if get_xrel:
+            x_rel = x - self.x_b[ix]
+            return ind, x_rel
+        return ind
+
     def get_value(self, p, x):
         """
         Calculate parameter's `p` value at location `x`.
@@ -286,20 +320,16 @@ class Device(object):
         x : number
             x coordinate inside a device.
         """
-        # checking arguments
+        # checking parameter name
         assert isinstance(p, str)
-        assert x <= self.x_b[-1]
+        assert p in self.params
 
         # checking object
         if not self.ready:
             self.prepare()
 
         # finding layer
-        for i in range(len(self.inds)):
-            if x <= self.x_b[i+1]:
-                break
-        x_rel = x - self.x_b[i]
-        ind = self.inds[i]
+        ind, x_rel = self.get_index(x, get_xrel=True)
         l = self.layers[ind]
 
         # calculating value
