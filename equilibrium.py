@@ -175,7 +175,7 @@ def psibi_solve(dd, psi_init, n_iter=3000, lam=1.0, delta_max=1e-6,
 # testing convergence
 if __name__ == '__main__':
     from diode_data import DiodeData
-    from sample_device import sd
+    from sample_diode import sd
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 

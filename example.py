@@ -2,15 +2,13 @@
 """
 An example that demonstrates calculating band diagram of a
 p-i-n diode at forward bias.
-
-@author: vsgolovin
 """
 
 import numpy as np
 from scipy.sparse import linalg as spla
 import matplotlib.pyplot as plt
 from diode_data import DiodeData
-from sample_device import sd
+from sample_diode import sd
 import vrs
 import flux
 import units

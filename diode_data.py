@@ -266,7 +266,7 @@ class DiodeData(object):
         self.solved_equilibrium = True
 
 if __name__ == '__main__':
-    from sample_device import sd
+    from sample_diode import sd
     import matplotlib.pyplot as plt
 
     # generating mesh
