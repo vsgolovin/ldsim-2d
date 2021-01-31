@@ -265,18 +265,46 @@ class LaserData(object):
         self.values['p0']= cc.p(psi, 0, Nv, Ev, Vt)
         self.solved_equilibrium = True
 
-
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     from sample_laser import sl
     ld = LaserData(sl, 3, 0.87e-4, 0.2, 0.01, 0.3, 0.3, 3.8, 1.0, 1e-5)
-    ld.generate_nonuniform_mesh(sl)
-    ld.make_dimensionless()
 
+    # generating mesh
+    ld.generate_nonuniform_mesh(sl)
     plt.figure("Sample laser / %d mesh points"%(len(ld.x)))
-    plt.plot(ld.x, ld.Gamma_f_nd(ld.x), label=ld.n_eff, c='k')
+    plt.plot(ld.x, ld.values['wg_mode'], label=ld.n_eff, c='k')
     plt.xlabel('Coordinate')
     plt.ylabel('Vertical mode profile')
     plt.twinx()
     plt.plot(ld.x, ld.values['Eg'], c='b')
     plt.ylabel('Bandgap', c='b')
+
+    # solve Poisson's equation at equilibrium
+    ld.make_dimensionless()
+    ld.solve_equilibrium()
+    ld.original_units()
+    x = ld.x
+    Ev = ld.values['Ev']
+    Ec = ld.values['Ec']
+    psi = ld.values['psi_eq']
+    n0 = ld.values['n0']
+    p0 = ld.values['p0']
+
+    # plotting band diagram
+    plt.figure('Equilibrium')
+    plt.plot(x, Ec-psi, 'k-', lw=1.0)
+    plt.plot(x, Ev-psi, 'k-', lw=1.0)
+    plt.xlabel('$x$')
+    plt.ylabel('$E$')
+    plt.twinx()
+    plt.plot(x, n0, 'b-', lw=0.5)
+    plt.plot(x, p0, 'r-', lw=0.5)
+    plt.ylabel('$n_0$, $p_0$')
+    plt.yscale('log')
+
+    # plotting convergence rate
+    plt.figure('Convergence')
+    plt.plot(ld.delta)
+    plt.xlabel('Iteration number')
+    plt.yscale('log')

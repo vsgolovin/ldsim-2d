@@ -308,4 +308,5 @@ if __name__ == '__main__':
 
     plt.figure('Convergence')
     plt.plot(dd.delta)
+    plt.xlabel('Iteration number')
     plt.yscale('log')
