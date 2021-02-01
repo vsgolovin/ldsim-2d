@@ -309,7 +309,7 @@ def residual(psi, phi_n, phi_p, dd):
         number of `dd` grid nodes.
     phi_n : numpy.ndarray
         Electron quasi-Fermi potential. `phi_n.shape == (m,)`.
-    phi_p : TYPE
+    phi_p : numpy.ndarray
         Hole quasi-Fermi potential. `phi_p.shape == (m,)`
     dd : diode_data.DiodeData
         Laser diode model parameters.
@@ -381,7 +381,7 @@ def jacobian(psi, phi_n, phi_p, dd):
         number of `dd` grid nodes.
     phi_n : numpy.ndarray
         Electron quasi-Fermi potential. `phi_n.shape == (m,)`.
-    phi_p : TYPE
+    phi_p : numpy.ndarray
         Hole quasi-Fermi potential. `phi_p.shape == (m,)`
     dd : diode_data.DiodeData
         Laser diode model parameters.
@@ -485,7 +485,7 @@ def jacobian(psi, phi_n, phi_p, dd):
 if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
-    from sample_device import sd
+    from sample_diode import sd
     from diode_data import DiodeData
 
     # initialization
