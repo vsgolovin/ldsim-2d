@@ -4,6 +4,8 @@
 A collection of functions for calculating recombination rates and corresponding
 derivatives.
 """
+
+import numpy as np
 import carrier_concentrations as cc
 
 def srh_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, ni, n0, p0, tau_n, tau_p):
@@ -145,6 +147,77 @@ def auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
     p = cc.p(psi, phi_p, Nv, Ev, Vt)
     pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
     Rdot = pdot * (Cn*n**2 + Cp*(2*n*p - n0*p0))
+    return Rdot
+
+def stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode,
+           omega):
+    """
+    Stimulated recombination rate.
+    """
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    n = np.min(np.stack([n, p]), axis=0)
+    g = g0*np.log(n/N_tr)
+    w = wg_mode*omega  # weight function
+    R = vg*g*S*w
+    return R
+
+def stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
+                 wg_mode, omega):
+    """
+    Stimulated recombination rate derivative with respect to potential.
+    """
+    # choosing between n and p
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    stack = np.stack([n, p])
+    ix = np.argmin(stack, axis=0)
+    ix2 = np.arange(len(n))  # stack[ix, :] doesn't do the trick
+    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
+    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
+    n = stack[ix, ix2]
+    ndot = np.stack([ndot, pdot])[ix, ix2]
+    Rdot = vg * wg_mode*omega*S * g0*ndot/n
+    return Rdot
+
+def stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
+                  wg_mode, omega):
+    """
+    Stimulated recombination rate derivative with respect to electron quasi
+    Fermi potential.
+    """
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    n = np.asarray(n)
+    p = np.asarray(p)
+    stack = np.stack([n, p])
+    ix = np.argmin(stack, axis=0)
+    ix2 = np.arange(len(n))
+    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
+    pdot = np.zeros_like(ndot)
+    n = stack[ix, ix2]
+    ndot = np.stack([ndot, pdot])[ix, ix2]
+    Rdot = vg * wg_mode*omega*S * g0*ndot/n
+    return Rdot
+
+def stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
+                  wg_mode, omega):
+    """
+    Stimulated recombination rate derivative with respect to electron quasi
+    Fermi potential.
+    """
+    n = cc.n(psi, phi_n, Nc, Ec, Vt)
+    p = cc.p(psi, phi_p, Nv, Ev, Vt)
+    n = np.asarray(n)
+    p = np.asarray(p)
+    stack = np.stack([n, p])
+    ix = np.argmin(stack, axis=0)
+    ix2 = np.arange(len(n))
+    ndot = np.zeros_like(n)
+    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
+    n = stack[ix, ix2]
+    ndot = np.stack([ndot, pdot])[ix, ix2]
+    Rdot = vg * wg_mode*omega*S * g0*ndot/n
     return Rdot
 
 # testing
