@@ -75,7 +75,7 @@ def jn_res(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     R_rad = rec.rad_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
     R_aug = rec.auger_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
     R_st  = rec.stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                       wg_mode, omega)
+                       wg_mode)
     R = R_srh + R_rad + R_aug + R_st
 
     # total residual
@@ -109,7 +109,7 @@ def jn_dF_dpsi(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d3_aug = rec.auger_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                n0, p0, Cn, Cp)
     d3_st  = rec.stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                              vg, g0, N_tr, wg_mode, omega)
+                              vg, g0, N_tr, wg_mode)
     J[1, :] = d1 - d2 - q*omega[1:-1]*(d3_srh+d3_rad+d3_aug+d3_st)[1:-1]
 
     # top diagonal
@@ -155,7 +155,7 @@ def jn_dF_dphin(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d3_aug = rec.auger_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                 n0, p0, Cn, Cp)
     d3_st  = rec.stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                               vg, g0, N_tr, wg_mode, omega)
+                               vg, g0, N_tr, wg_mode)
     J[1, :] = d1 - d2 - q*(xm[1:]-xm[:-1])*(d3_srh+d3_rad+d3_aug+d3_st)[1:-1]
 
     # top diagonal
@@ -190,7 +190,7 @@ def jn_dF_dphip(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d_aug = rec.auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                n0, p0, Cn, Cp)
     d_st = rec.stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                             vg, g0, N_tr, wg_mode, omega)
+                             vg, g0, N_tr, wg_mode)
 
     J[0, :] = -q*(xm[1:]-xm[:-1]) * (d_srh+d_rad+d_aug+d_st)[1:-1]
     return J
@@ -218,7 +218,8 @@ def jp_res(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
                       tau_n, tau_p)
     R_rad = rec.rad_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
     R_aug = rec.auger_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    R_st  = rec.stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode, omega)
+    R_st  = rec.stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
+                       wg_mode)
     R = R_srh + R_rad + R_aug + R_st
 
     # total residual
@@ -252,7 +253,7 @@ def jp_dF_dpsi(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d3_aug = rec.auger_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                n0, p0, Cn, Cp)
     d3_st  = rec.stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                              vg, g0, N_tr, wg_mode, omega)
+                              vg, g0, N_tr, wg_mode)
     J[1, :] = d1 - d2 + q*(xm[1:]-xm[:-1])*(d3_srh+d3_rad+d3_aug+d3_st)[1:-1]
 
     # top diagonal
@@ -288,7 +289,7 @@ def jp_dF_dphin(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d_aug = rec.auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                n0, p0, Cn, Cp)
     d_st  = rec.stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                              vg, g0, N_tr, wg_mode, omega)
+                              vg, g0, N_tr, wg_mode)
     J[0, :] = q*(xm[1:]-xm[:-1])*(d_srh+d_rad+d_aug+d_st)[1:-1]
 
     return J
@@ -320,7 +321,7 @@ def jp_dF_dphip(psi, phi_n, phi_p, S, x, xm, Nc, Nv, Ec, Ev,
     d3_aug = rec.auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt,
                                 n0, p0, Cn, Cp)
     d3_st  = rec.stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt,
-                               vg, g0, N_tr, wg_mode, omega)
+                               vg, g0, N_tr, wg_mode)
     J[1, :] = d1 - d2 + q*(xm[1:]-xm[:-1])*(d3_srh+d3_rad+d3_aug+d3_st)[1:-1]
 
     # top diagonal

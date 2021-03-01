@@ -149,8 +149,7 @@ def auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
     Rdot = pdot * (Cn*n**2 + Cp*(2*n*p - n0*p0))
     return Rdot
 
-def stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode,
-           omega):
+def stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode):
     """
     Stimulated recombination rate.
     """
@@ -158,12 +157,11 @@ def stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode,
     p = cc.p(psi, phi_p, Nv, Ev, Vt)
     n = np.min(np.stack([n, p]), axis=0)
     g = g0*np.log(n/N_tr)
-    w = wg_mode*omega  # weight function
-    R = vg*g*S*w
+    R = vg*g*S*wg_mode
     return R
 
 def stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                 wg_mode, omega):
+                 wg_mode):
     """
     Stimulated recombination rate derivative with respect to potential.
     """
@@ -177,11 +175,11 @@ def stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
     pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
     n = stack[ix, ix2]
     ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*omega*S * g0*ndot/n
+    Rdot = vg * wg_mode*S * g0*ndot/n
     return Rdot
 
 def stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                  wg_mode, omega):
+                  wg_mode):
     """
     Stimulated recombination rate derivative with respect to electron quasi
     Fermi potential.
@@ -197,11 +195,11 @@ def stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
     pdot = np.zeros_like(ndot)
     n = stack[ix, ix2]
     ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*omega*S * g0*ndot/n
+    Rdot = vg * wg_mode*S * g0*ndot/n
     return Rdot
 
 def stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                  wg_mode, omega):
+                  wg_mode):
     """
     Stimulated recombination rate derivative with respect to electron quasi
     Fermi potential.
@@ -217,7 +215,7 @@ def stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
     pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
     n = stack[ix, ix2]
     ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*omega*S * g0*ndot/n
+    Rdot = vg * wg_mode*S * g0*ndot/n
     return Rdot
 
 # testing
