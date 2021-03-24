@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Tools for setting up the problem. Class `Device` is used to define values of
-all the the input parameters (doping densities, energy band boundaries, carrier
-mobilities, etc.) at every point of the 1D device.
+Tools for setting up the problem. Class `Slice` is used to define values of
+all the input parameters (doping densities, energy band boundaries, carrier
+mobilities, etc.) for every x in a 1D slice of a device.
 """
 
 import numpy as np
 
 class PhysParam(object):
 
-    def __init__(self, name, dx, y1=None, y2=None, y_fun=None):
+    def __init__(self, name, dx, y):
         """
         Class for storing values of physical parameters (mobility, doping
         density, etc) in a layer of thickness `dx`.
@@ -20,17 +20,13 @@ class PhysParam(object):
             Name of the physical parameter.
         dx : number
             Thickness of the corresponding layer.
-        y1 : number or NoneType, Optional
-            Value of the physical parameter at x=0. Not needed if `y_fun` is
-            specified.
-        y2 : number or NoneType, Optional
-            Value of the physical parameter at x=`dx`. Values between 0 and
-            'dx' are calculated using linear interpolation. Not needed if
-            `y_fun` is specified.
-        y_fun : function or NoneType, Optional
-            Function for calculating physical parameter value at arbitrary x
-            between 0 and `dx`. Should have only one argument. Takes precedence
-            over `y1` and `y2`.
+        y : number, tuple or function
+            Parameter value. Possible formats:
+                * Single number. In this case parameter value does not depend
+                  on x coordinate.
+                * Two numbers (tuple or list). Here parameter value is a linear
+                  function of x, y(x=0) = `y[0]`, y(x=dx) = `y[1]`.
+                * Function of x. Should be defined at [0, `dx`].
         """
         assert isinstance(dx, (float, int))
         self.dx = float(dx)
@@ -38,22 +34,21 @@ class PhysParam(object):
         self.name = name
 
         # picking a function for calculating y
-        if y_fun is not None:  # function is passed as y_fun
-            try:  # simple tests of y_fun
-                y_fun(0)
-                y_fun(self.dx/2)
-                y_fun(self.dx)
+        if callable(y):
+            try:  # simple tests
+                y(0)
+                y(self.dx/2)
+                y(self.dx)
             except:
-                raise Exception('Function y_fun is incorrectly defined.')
-            self.y_fun = y_fun
-        else:  # y_fun is None
-            assert isinstance(y1, (float, int))
-            if y2 is not None:
-                assert isinstance(y2, (float, int))
-                k = (y2-y1) / self.dx
-                self.y_fun = lambda x: y1+k*x
-            else:
-                self.y_fun = lambda x: y1
+                raise Exception('Function y is incorrectly defined.')
+            self.y_fun = y
+        elif isinstance(y, (tuple, list)):
+            assert len(y)==2 and all([isinstance(yi, (float, int)) for yi in y])
+            self.y_fun = lambda x: y[0] + ((y[1]-y[0])/dx) * x
+        elif isinstance(y, (int, float)):
+            self.y_fun = lambda x: y
+        else:
+            raise Exception('Parameter %s: y is incorrectly defined' % name)
 
     def get_name(self):
         """
@@ -68,8 +63,7 @@ class PhysParam(object):
         if isinstance(x, np.ndarray):
             assert x.max()<=self.dx and x.min()>=0
         else:
-            assert isinstance(x, (float, int))
-            assert x>=0 and x<=self.dx
+            assert isinstance(x, (float, int)) and x>=0 and x<=self.dx
         return self.y_fun(x)
 
 class Layer(object):
@@ -107,7 +101,7 @@ class Layer(object):
         return self.dx
 
     # setters for physical parameters
-    def set_parameter(self, p, y1=None, y2=None, y_fun=None):
+    def set_parameter(self, p, y):
         """
         Add a `PhysParam` object to the layer.
 
@@ -115,19 +109,15 @@ class Layer(object):
         ----------
         p : str
             Parameter name.
-        y1 : number or NoneType, Optional
-            Value of the physical parameter at x=0. Not needed if `y_fun` is
-            specified.
-        y2 : number or NoneType, Optional
-            Value of the physical parameter at x=`dx`. Values between 0 and
-            'dx' are calculated using linear interpolation. Not needed if
-            `y_fun` is specified.
-        y_fun : function or NoneType, Optional
-            Function for calculating physical parameter value at arbitrary x
-            between 0 and `dx`. Should have only one argument. Takes precedence
-            over `y1` and `y2`. 
+        y : number, tuple or function
+            Parameter value. Possible formats:
+                * Single number. In this case parameter value does not depend
+                  on x coordinate.
+                * Two numbers (tuple or list). Here parameter value is a linear
+                  function of x, y(x=0) = `y[0]`, y(x=dx) = `y[1]`.
+                * Function of x. Should be defined at [0, `dx`].
         """
-        param = PhysParam(name=p, dx=self.dx, y1=y1, y2=y2, y_fun=y_fun)
+        param = PhysParam(name=p, dx=self.dx, y=y)
         self.params[p] = param
 
     def check_parameters(self, nparams):
@@ -137,7 +127,7 @@ class Layer(object):
         Parameters
         ----------
         nparams : iterable
-            List or tuple of necessary physical parameters (str).
+            List or tuple of necessary physical parameters' names.
 
         Returns
         -------
@@ -196,7 +186,7 @@ class Layer(object):
         y = pv.get_value(x)
         return y
 
-class Device(object):
+class Slice(object):
 
     def __init__(self, params):
         """
@@ -213,23 +203,41 @@ class Device(object):
         self.params = params
         self.layers = dict()
         self.ind_max = -1
-        self.ready = False
+        self.inds = []
+        self.x_b = np.empty(0)
+
+    def _prepare(self):
+        """
+        Prepare object for calculations:
+        1. Create a list of sorted layer indices `inds`.
+        2. Create a `numpy.ndarray` of layer boundaries `x_b`.
+        """
+        self.inds = sorted(self.layers.keys())
+        self.x_b = np.zeros(len(self.inds)+1)
+        i = 1
+        for ind in self.inds:
+            l = self.layers[ind]
+            dx = l.get_thickness()
+            self.x_b[i] = self.x_b[i-1] + dx
+            i += 1
 
     def add_layer(self, l, ind=-1):
         """
-        Add a layer to device.
+        Add a layer to slice. Check of all the needed parameters were
+        specified.
 
         Parameters
         ----------
         l : Layer
             Layer to be added.
         ind : int, optional
-            Index describing layer location in the device. Smaller indices
+            Index describing layer location in the slice. Smaller indices
             correspond to smaller x coordinates. Default value is `-1`, that is
-            the new layer is added to the top of the device (largest index and
+            the new layer is added to the top of the slice (largest index and
                                                              largest x).
         """
         assert isinstance(ind, int) and (ind>=0 or ind==-1)
+        l.prepare(self.params)  # checking parameters
         if ind==-1:
             self.layers[self.ind_max+1] = l
             self.ind_max += 1
@@ -237,37 +245,13 @@ class Device(object):
             self.layers[ind] = l
             if ind>self.ind_max:
                 self.ind_max = ind
-        self.ready = False
-
-    def prepare(self):
-        """
-        Prepare object for calculations:
-        1. Check if all the necessary parameters are specified in every layer.
-        2. Create a list of sorted layer indices `inds`.
-        3. Create a `numpy.ndarray` of layer boundaries `x_b`.
-        """
-        self.inds = sorted(self.layers.keys())
-        self.x_b = np.zeros(len(self.inds)+1)
-        i = 1
-        for ind in self.inds:
-            l = self.layers[ind]
-            l.prepare(self.params)
-            dx = l.get_thickness()
-            self.x_b[i] = self.x_b[i-1] + dx
-            i += 1
-        self.ready = True
+        self._prepare()  # updating array of indices and boundaries
 
     def get_thickness(self):
         """
-        Get total device thickness.
+        Get total slice thickness.
         """
-        if self.ready:  # already calculated boundaries
-            return self.x_b[-1]
-        else:  # calculate by adding up layers' thicknesses
-            width = 0
-            for l in self.layers.values():
-                width += l.get_thickness()
-            return width
+        return self.x_b[-1]
 
     def get_params(self):
         """
@@ -283,7 +267,7 @@ class Device(object):
         Parameters
         ----------
         x : number
-            x coordinate inside device.
+            x coordinate inside slice.
         get_xrel : bool, optional
             Whether to return relative position inside layer.
 
@@ -318,15 +302,11 @@ class Device(object):
         p : str
             Physical parameter name (i.e. 'Ec`).
         x : number
-            x coordinate inside a device.
+            x coordinate inside a slice.
         """
         # checking parameter name
         assert isinstance(p, str)
         assert p in self.params
-
-        # checking object
-        if not self.ready:
-            self.prepare()
 
         # finding layer
         ind, x_rel = self.get_index(x, get_xrel=True)
@@ -337,17 +317,17 @@ class Device(object):
         return y
 
 # some unnecessary tests
-def test_physparam_y1():
-    """Only y1 is specified."""
-    p = PhysParam("mu_n", 0.1, y1=300)
+def test_physparam_num():
+    "Single number as y."
+    p = PhysParam("mu_n", 0.1, y=300)
     y = p.get_value(0.07)
     eps = 1e-6
     success = np.abs(y-300)<eps
     assert success
 
-def test_physparam_y1y2():
-    """Both y1 and y2 are specified."""
-    p = PhysParam("Ec", 10, y1=1, y2=-1)
+def test_physparam_dual():
+    "y is two numbers."
+    p = PhysParam("Ec", 10, [1, -1])
     x = np.array([0, 2, 5, 10])
     y = p.get_value(x)
     y_correct = np.array([1, 0.6, 0.0, -1.0])
@@ -356,9 +336,9 @@ def test_physparam_y1y2():
     success = (dy<eps).all()
     assert success
 
-def test_physparam_yfun():
-    """y_fun is used for calculation instead of y1 and y2."""
-    p = PhysParam("Ec", 10, y1=1, y2=-1, y_fun=lambda x: x**2)
+def test_physparam_fun():
+    "y is a function."
+    p = PhysParam("Ec", 10, y=lambda x: x**2)
     x = np.array([0, 2, 5, 10])
     y = p.get_value(x)
     y_correct = np.array([0, 4, 25, 100])
@@ -388,10 +368,10 @@ def test_layer_cf():
     success = (not s) and ('foo' in m) and (len(m)==1)
     assert success
 
-def test_device():
+def test_slice():
     """
     Testing if doping profile is correctly evaluated in
-    a two-layer device.
+    a two-layer slice.
     """
     # creating layers
     l1 = Layer('n', 1e-4)
@@ -401,12 +381,11 @@ def test_device():
     l2.set_parameter('Nd', 4e17)
     l2.set_parameter('Na', 9e17)
 
-    # assembling device
+    # assembling slice
     n_params = ['Nd', 'Na']
-    d = Device(n_params)
+    d = Slice(n_params)
     d.add_layer(l2, 1)
     d.add_layer(l1, 0)
-    d.prepare()
 
     # calculating and checking doping profile
     x = np.array([0, 0.5e-4, 0.99e-4, 1.01e-4, 2e-4, 3e-4])
@@ -418,9 +397,9 @@ def test_device():
     success = (err<1e-6).all()
     assert success
 
-def test_device_thickness():
+def test_slice_thickness():
     """
-    Testing the Device.get_thickness() method.
+    Testing the Slice.get_thickness() method.
     """
     # creating layers
     n_params = ['Ec', 'Ev']
@@ -432,11 +411,10 @@ def test_device_thickness():
     l2.set_parameter('Ec', 1.6)
 
     # assembling device and calculating for both cases
-    d = Device(n_params)
+    d = Slice(n_params)
     d.add_layer(l1)
     d.add_layer(l2)
     x1 = d.get_thickness()
-    d.prepare()
     x2 = d.get_thickness()
 
     # checking values
