@@ -144,7 +144,7 @@ class Layer(object):
                 missing.append(s)
         return success, missing
 
-    def prepare(self, nparams):
+    def check(self, nparams):
         """
         Make sure all the needed parameters are specified or calculated.
 
@@ -188,29 +188,21 @@ class Layer(object):
 
 class Slice(object):
 
-    def __init__(self, params):
+    def __init__(self):
         """
         Class for storing a collection of `Layer` objects, each corresponding
         to a particular index.
-
-        Parameters
-        ----------
-        params : iterable
-            List or tuple of necessary physical parameters (str).
         """
-        assert isinstance(params, (list, tuple))
-        assert all([isinstance(p, str) for p in params])
-        self.params = params
         self.layers = dict()
-        self.ind_max = -1
-        self.inds = []
-        self.x_b = np.empty(0)
+        self.ind_max = -1       # top layer index
+        self.inds = []          # sorted keys of `self.layers`
+        self.x_b = np.empty(0)  # layer boundaries' coordinates
 
-    def _prepare(self):
+    def _update(self):
         """
-        Prepare object for calculations:
-        1. Create a list of sorted layer indices `inds`.
-        2. Create a `numpy.ndarray` of layer boundaries `x_b`.
+        Update:
+        1. List of sorted layer indices `inds`.
+        2. `numpy.ndarray` of layer boundaries `x_b`.
         """
         self.inds = sorted(self.layers.keys())
         self.x_b = np.zeros(len(self.inds)+1)
@@ -223,8 +215,7 @@ class Slice(object):
 
     def add_layer(self, l, ind=-1):
         """
-        Add a layer to slice. Check of all the needed parameters were
-        specified.
+        Add a layer to slice.
 
         Parameters
         ----------
@@ -234,10 +225,9 @@ class Slice(object):
             Index describing layer location in the slice. Smaller indices
             correspond to smaller x coordinates. Default value is `-1`, that is
             the new layer is added to the top of the slice (largest index and
-                                                             largest x).
+                                                            largest x).
         """
         assert isinstance(ind, int) and (ind>=0 or ind==-1)
-        l.prepare(self.params)  # checking parameters
         if ind==-1:
             self.layers[self.ind_max+1] = l
             self.ind_max += 1
@@ -245,19 +235,13 @@ class Slice(object):
             self.layers[ind] = l
             if ind>self.ind_max:
                 self.ind_max = ind
-        self._prepare()  # updating array of indices and boundaries
+        self._update()  # updating arrays of indices and boundaries
 
     def get_thickness(self):
         """
         Get total slice thickness.
         """
         return self.x_b[-1]
-
-    def get_params(self):
-        """
-        Get all the necessary physical parameters' names.
-        """
-        return self.params
 
     def get_index(self, x, get_xrel=False):
         """
@@ -306,7 +290,6 @@ class Slice(object):
         """
         # checking parameter name
         assert isinstance(p, str)
-        assert p in self.params
 
         # finding layer
         ind, x_rel = self.get_index(x, get_xrel=True)
@@ -382,8 +365,7 @@ def test_slice():
     l2.set_parameter('Na', 9e17)
 
     # assembling slice
-    n_params = ['Nd', 'Na']
-    d = Slice(n_params)
+    d = Slice()
     d.add_layer(l2, 1)
     d.add_layer(l1, 0)
 
@@ -402,7 +384,6 @@ def test_slice_thickness():
     Testing the Slice.get_thickness() method.
     """
     # creating layers
-    n_params = ['Ec', 'Ev']
     l1 = Layer('AlGaAs', 1.5e-4)
     l1.set_parameter('Ev', 0)
     l1.set_parameter('Ec', 1.8)
@@ -411,7 +392,7 @@ def test_slice_thickness():
     l2.set_parameter('Ec', 1.6)
 
     # assembling device and calculating for both cases
-    d = Slice(n_params)
+    d = Slice()
     d.add_layer(l1)
     d.add_layer(l2)
     x1 = d.get_thickness()
