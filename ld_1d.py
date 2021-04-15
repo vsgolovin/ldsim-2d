@@ -3,7 +3,6 @@
 Class for a 1-dimensional model of a laser diode.
 """
 
-import warnings
 import numpy as np
 from scipy.interpolate import interp1d
 from slice_1d import Slice
@@ -20,6 +19,7 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'Cn':1/(units.n**2*units.t), 'Cp':1/(units.n**2*units.t),
                'eps':1, 'n_refr':1, 'ni':units.n, 'wg_mode':1/units.x,
                'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_eq':units.V,
+               'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
                'g0':1/units.x, 'N_tr':units.n}
 
 class LaserDiode1D(object):
@@ -66,6 +66,13 @@ class LaserDiode1D(object):
         assert all([ar_ind in inds for ar_ind in self.ar_inds])
         self.slc = slc
 
+        # constants
+        self.Vt = const.kb*const.T
+        self.q = const.q
+        self.eps_0 = const.eps_0
+        self.fca_e = const.fca_e
+        self.fca_h = const.fca_h
+
         # device parameters
         self.L = L
         self.w = w
@@ -77,6 +84,9 @@ class LaserDiode1D(object):
         self.photon_energy = const.h*const.c/lam
         self.ng = ng
         self.vg = const.c/ng
+
+        self.gen_uniform_mesh()
+        self.is_dimensionless = False
 
         # parameters at mesh nodes
         self.yin = dict()  # values at interior nodes
@@ -112,13 +122,6 @@ class LaserDiode1D(object):
             If `p` is an unknown parameter name.
 
         """
-        # checking if there is a mesh
-        try:
-            self.xin
-        except AttributeError:
-            warnings.warn('Warning: trying to calculate parameter %s before '
-                          'generating mesh. Will use default uniform mesh.'%p)
-            self.gen_uniform_mesh()
         # picking nodes
         if nodes=='internal' or nodes=='i':
             x = self.xin
@@ -128,15 +131,16 @@ class LaserDiode1D(object):
             d = self.ybn
 
         # calculating values
+        dtype = np.dtype('float64')
         if p in inp_params:
-            y = np.array([self.slc.get_value(p, xi) for xi in x])
+            y = np.array([self.slc.get_value(p, xi) for xi in x], dtype=dtype)
         elif p=='Eg':
-            Ec = np.array([self.slc.get_value('Ec', xi) for xi in x])
-            Ev = np.array([self.slc.get_value('Ev', xi) for xi in x])
+            Ec = np.array([self.slc.get_value('Ec', xi) for xi in x], dtype=dtype)
+            Ev = np.array([self.slc.get_value('Ev', xi) for xi in x], dtype=dtype)
             y = Ec-Ev
         elif p=='C_dop':
-            Nd = np.array([self.slc.get_value('Nd', xi) for xi in x])
-            Na = np.array([self.slc.get_value('Na', xi) for xi in x])
+            Nd = np.array([self.slc.get_value('Nd', xi) for xi in x], dtype=dtype)
+            Na = np.array([self.slc.get_value('Na', xi) for xi in x], dtype=dtype)
             y = Nd-Na
         else:
             raise Exception('Error: unknown parameter %s' % p)
@@ -162,7 +166,7 @@ class LaserDiode1D(object):
             The default is 'Eg'.
         sigma : float, optional
             Gaussian function standard deviation. The default is 100e-7.
-        y_ext : TYPE, optional
+        y_ext : number or NoneType, optional
             `param` values outside the laser boundaries. These are used for
             obtaining finer mesh at contacts. Pass [None, None] to disable
             this feature. The default is [0, 0].
@@ -210,6 +214,70 @@ class LaserDiode1D(object):
             self.calculate_param(p, 'i')
         for p in ybn_params:
             self.calculate_param(p, 'b')
+
+    def make_dimensionless(self):
+        "Make every parameter dimensionless."
+        if self.is_dimensionless:
+            return
+
+        # constants
+        self.Vt /= units.V
+        self.q /= units.q
+        self.eps_0 /= units.q/(units.x*units.V)
+        self.fca_e /= 1/(units.n*units.x)
+        self.fca_h /= 1/(units.n*units.x)
+
+        # device parameters
+        self.L /= units.x
+        self.w /= units.x
+        self.vg /= units.x/units.t
+        # no need to convert other parameters (?)
+
+        # mesh
+        self.xin /= units.x
+        self.xbn /= units.x
+
+        # arrays
+        for key in self.yin:
+            self.yin[key] /= unit_values[key]
+        for key in self.ybn:
+            self.ybn[key] /= unit_values[key]
+        for key in self.sol:
+            self.sol[key] /= unit_values[key]
+
+        self.is_dimensionless = True
+
+    def original_units(self):
+        "Convert all values back to original units."
+        if not self.is_dimensionless:
+            return
+
+        # constants
+        self.Vt *= units.V
+        self.q *= units.q
+        self.eps_0 *= units.q/(units.x*units.V)
+        self.fca_e *= 1/(units.n*units.x)
+        self.fca_h *= 1/(units.n*units.x)
+
+        # device parameters
+        self.L *= units.x
+        self.w *= units.x
+        self.vg *= units.x/units.t
+        # no need to convert other parameters (?)
+
+        # mesh
+        self.xin *= units.x
+        self.xbn *= units.x
+
+        # arrays
+        for key in self.yin:
+            self.yin[key] *= unit_values[key]
+        for key in self.ybn:
+            self.ybn[key] *= unit_values[key]
+        for key in self.sol:
+            self.sol[key] *= unit_values[key]
+
+        self.is_dimensionless = False
 
 #%%
 if __name__=='__main__':
