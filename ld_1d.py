@@ -8,6 +8,9 @@ from scipy.interpolate import interp1d
 from slice_1d import Slice
 import constants as const
 import units
+import carrier_concentrations as cc
+import equilibrium as eq
+import newton
 
 inp_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
               'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr']
@@ -85,13 +88,13 @@ class LaserDiode1D(object):
         self.ng = ng
         self.vg = const.c/ng
 
-        self.gen_uniform_mesh()
-        self.is_dimensionless = False
-
         # parameters at mesh nodes
         self.yin = dict()  # values at interior nodes
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
+
+        self.gen_uniform_mesh()
+        self.is_dimensionless = False
 
     def gen_uniform_mesh(self, step=1e-7):
         """
@@ -103,6 +106,7 @@ class LaserDiode1D(object):
             raise Exception("Mesh step (%f) is too large." % step)
         self.xin = np.arange(0, d, step)
         self.xbn = (self.xin[1:]+self.xin[:-1]) / 2
+        self.calc_all_params()
 
     def calculate_param(self, p, nodes='internal'):
         """
@@ -207,6 +211,7 @@ class LaserDiode1D(object):
             xi += step_min + k*(1-fg_fun(xi))
         self.xin = np.array(new_grid)
         self.xbn = (self.xin[1:] + self.xin[:-1]) / 2
+        self.calc_all_params()
 
     def calc_all_params(self):
         "Calculate all parameters' values at mesh nodes."
@@ -279,6 +284,57 @@ class LaserDiode1D(object):
 
         self.is_dimensionless = False
 
+    def gen_lcn_solver(self):
+        """
+        Generate solver for potential distribution along vertical axis at
+        zero external bias assuming local charge neutrality.
+        """
+        def f(psi):
+            n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
+            p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
+            return self.yin['C_dop']-n+p
+        def fdot(psi):
+            ndot = cc.dn_dpsi(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
+            pdot = cc.dp_dpsi(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
+            return -ndot+pdot
+
+        # initial guess with Boltzmann statistics
+        ni = eq.intrinsic_concentration(self.yin['Nc'], self.yin['Nv'],
+                                        self.yin['Ec'], self.yin['Ev'], self.Vt)
+        Ei = eq.intrinsic_level(self.yin['Nc'], self.yin['Nv'], self.yin['Ec'],
+                                self.yin['Ev'], self.Vt)
+        Ef_i = eq.Ef_lcn_boltzmann(self.yin['C_dop'], ni, Ei, self.Vt)
+
+        # Jacobian is a vector -> element-wise division
+        la_fun = lambda A, b: b/A
+
+        sol = newton.NewtonSolver(f, fdot, Ef_i, la_fun)
+        return sol
+
+    def solve_lcn(self, maxiter=100, fluct=1e-7, omega=1):
+        """
+        Find potential distribution at zero external bias assuming local
+        charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int
+            Maximum number of Newton's method iterations.
+        fluct : float
+            Fluctuation of solution that is needed to stop iterating before
+            reaching `maxiter`.
+        omega : float
+            Damping parameter.
+
+        """
+        sol = self.gen_lcn_solver()
+        while sol.i<maxiter:
+            sol.step(omega)
+            if sol.fluct[-1]<fluct:
+                break
+
+        self.yin['psi_lcn'] = sol.x.copy()
+
 #%%
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -289,10 +345,12 @@ if __name__=='__main__':
                       R1=0.95, R2=0.05,
                       lam=0.87e-4, ng=3.9,
                       alpha_i=0.5, beta_sp=1e-4)
+    
+    # 1. nonuniform mesh
     ld.gen_nonuniform_mesh(param='Eg', y_ext=[0, 0])
     ld.calc_all_params()
     x = ld.xin*1e4
-    plt.figure()
+    plt.figure('Flat bands')
     plt.plot(x, ld.yin['Ec'], lw=0.5, color='b')
     plt.plot(x, ld.yin['Ev'], lw=0.5, color='b')
     plt.xlabel(r'$x$ ($\mu$m)')
@@ -301,3 +359,13 @@ if __name__=='__main__':
     plt.plot(x, ld.yin['n_refr'], lw=0.5, ls=':', color='g', marker='x',
              ms=3)
     plt.ylabel('Refractive index', color='g')
+
+    # 2. local charge neutrality
+    ld.make_dimensionless()
+    ld.solve_lcn()
+    ld.original_units()
+    plt.figure('Local charge neutrality')
+    plt.plot(x, ld.yin['Ec']-ld.yin['psi_lcn'], lw=0.5, color='b')
+    plt.plot(x, ld.yin['Ev']-ld.yin['psi_lcn'], lw=0.5, color='b')
+    plt.xlabel(r'$x$ ($\mu$m)')
+    plt.ylabel('Energy (eV)', color='b')
