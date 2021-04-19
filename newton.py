@@ -5,6 +5,11 @@ Defines a class for solving systems of equations using Newton's method.
 
 import numpy as np
 
+def l2_norm(x):
+    "Calculate L2 (Euclidean) norm of vector `x`."
+    x = np.asarray(x)
+    return np.sqrt(np.sum(x*x))
+
 class NewtonSolver(object):
 
     def __init__(self, res, jac, x0, linalg_solver):
@@ -14,7 +19,7 @@ class NewtonSolver(object):
         Parameters
         ----------
         res : callable
-            Right-hand side of the system.
+            Right-hand side (residual) of the system.
         jac : callable
             Jacobian of the system.
         x0 : array-like
@@ -28,8 +33,8 @@ class NewtonSolver(object):
         self.x = x0
         self.la_solver = linalg_solver
         self.i = 0  # iteration number
-        self.rnorms = list()   # euler norms of residual vectors
-        self.dxnorms = list()  # euler norms of update vectors
+        self.rnorms = list()  # L2 norms of residuals
+        self.fluct = list()   # fluctuation values -- ||dx|| / ||x||
 
     def step(self, omega=1.0):
         """
@@ -46,18 +51,17 @@ class NewtonSolver(object):
 
         # calculate residual and Jacobian
         self.rvec = self.rfun(self.x)
-        rnorm = np.sqrt(np.sum(self.rvec**2))
-        self.rnorms.append(rnorm)
+        self.rnorms.append(l2_norm(self.rvec))
         self.jac = self.jfun(self.x)
 
         # solve J*dx = -r system and update x
         dx = self.la_solver(self.jac, -self.rvec)
+        self.fluct.append(l2_norm(dx)/l2_norm(self.x))
         self.x += dx*omega
         self.i += 1
 
 if __name__=='__main__':
     # solving a simple nonlinear system
-    from numpy.linalg import solve
     import matplotlib.pyplot as plt
      
     def residual(x):
@@ -85,11 +89,10 @@ if __name__=='__main__':
         sol.step(omega=0.8)
         solutions[i+1, :] = sol.x.copy()
 
-    plt.figure('Residual')
-    plt.plot(np.arange(niter)+1, sol.rnorms)
-    plt.yscale('log')
+    plt.figure('Convergence')
+    plt.semilogy(np.arange(niter)+1, sol.fluct)
     plt.xlabel('Iteration number')
-    plt.ylabel(r'$||r||_2$')
+    plt.ylabel(r'Fluctuation $||\Delta x||/||x||$')
 
     plt.figure('x[0]')
     plt.plot(np.arange(niter+1), solutions[:, 0], 'bx--')
