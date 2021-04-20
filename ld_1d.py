@@ -5,6 +5,7 @@ Class for a 1-dimensional model of a laser diode.
 
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.linalg import solve_banded
 from slice_1d import Slice
 import constants as const
 import units
@@ -286,8 +287,8 @@ class LaserDiode1D(object):
 
     def gen_lcn_solver(self):
         """
-        Generate solver for potential distribution along vertical axis at
-        zero external bias assuming local charge neutrality.
+        Generate solver for electrostatic potential distribution along
+        vertical axis at equilibrium assuming local charge neutrality.
         """
         def f(psi):
             n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
@@ -334,21 +335,61 @@ class LaserDiode1D(object):
                 break
 
         self.yin['psi_lcn'] = sol.x.copy()
+        self.yin['n0'] = cc.n(psi=self.yin['psi_lcn'], phi_n=0,
+                              Nc=self.yin['Nc'], Ec=self.yin['Ec'],
+                              Vt=self.Vt)
+        self.yin['p0'] = cc.p(psi=self.yin['psi_lcn'], phi_p=0,
+                              Nv=self.yin['Nv'], Ev=self.yin['Ev'],
+                              Vt=self.Vt)
+
+    def gen_equilibrium_solver(self):
+        """
+        Generate solver for electrostatic potential distribution along
+        vertical axis at equilibrium.
+        """
+        if 'psi_lcn' not in self.yin:
+            self.solve_lcn()
+        h = self.xin[1:]-self.xin[:-1]
+        w = self.xbn[1:]-self.xbn[:-1]
+
+        def res(psi):
+            n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
+            p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
+            r = eq.poisson_res(psi, n, p, h, w, self.yin['eps'], self.eps_0,
+                               self.q, self.yin['C_dop'])
+            return r
+
+        def jac(psi):
+            n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
+            ndot = cc.dn_dpsi(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
+            p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
+            pdot = cc.dp_dpsi(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
+            j = eq.poisson_jac(psi, n, ndot, p, pdot, h, w, self.yin['eps'],
+                                self.eps_0, self.q, self.yin['C_dop'])
+            return j
+
+        la_fun = lambda A, b: solve_banded((1,1), A, b)
+        psi_init = self.yin['psi_lcn'].copy()
+        sol = newton.NewtonSolver(res, jac, psi_init, la_fun, True)
+        return sol
 
 #%%
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     from sample_slice import sl
 
+    print('Creating an instance of LaserDiode1D...', end=' ')
     ld = LaserDiode1D(slc=sl, ar_inds=3,
                       L=3000e-4, w=100e-4,
                       R1=0.95, R2=0.05,
                       lam=0.87e-4, ng=3.9,
                       alpha_i=0.5, beta_sp=1e-4)
+    print('Complete.')
     
     # 1. nonuniform mesh
+    print('Generating a nonuniform mesh...', end=' ')
     ld.gen_nonuniform_mesh(param='Eg', y_ext=[0, 0])
-    ld.calc_all_params()
+    print('Complete.')
     x = ld.xin*1e4
     plt.figure('Flat bands')
     plt.plot(x, ld.yin['Ec'], lw=0.5, color='b')
@@ -360,12 +401,22 @@ if __name__=='__main__':
              ms=3)
     plt.ylabel('Refractive index', color='g')
 
-    # 2. local charge neutrality
+    # 2. equilibrium
     ld.make_dimensionless()
+    print('Calculating built-in potential assuming local charge neutrality...',
+          end=' ')
     ld.solve_lcn()
+    print('Complete.')
+    print('Calculating built-in potential by solving Poisson\'s equation...',
+          end=' ')
+    sol = ld.gen_equilibrium_solver()
+    for i in range(50):
+        sol.step()
+    print('Complete...')
     ld.original_units()
-    plt.figure('Local charge neutrality')
-    plt.plot(x, ld.yin['Ec']-ld.yin['psi_lcn'], lw=0.5, color='b')
-    plt.plot(x, ld.yin['Ev']-ld.yin['psi_lcn'], lw=0.5, color='b')
+    psi = sol.x * units.V
+    plt.figure('Equilibrium')
+    plt.plot(x, ld.yin['Ec']-psi, lw=0.5, color='b')
+    plt.plot(x, ld.yin['Ev']-psi, lw=0.5, color='b')
     plt.xlabel(r'$x$ ($\mu$m)')
-    plt.ylabel('Energy (eV)', color='b')
+    plt.ylabel('Energy (eV)')

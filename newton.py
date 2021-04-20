@@ -12,7 +12,7 @@ def l2_norm(x):
 
 class NewtonSolver(object):
 
-    def __init__(self, res, jac, x0, linalg_solver):
+    def __init__(self, res, jac, x0, linalg_solver, fix_boundary=False):
         """
         Class for solving a system of equations using Newton's method.
 
@@ -26,12 +26,15 @@ class NewtonSolver(object):
             Initial guess.
         linalg_solver : callable
             Method for solving the 'A*x = b` system.
+        fix_boundary : bool
+            Whether to keep boundary points of solution unchanged.
 
         """
         self.rfun = res
         self.jfun = jac
         self.x = x0
         self.la_solver = linalg_solver
+        self.fix_boundary = fix_boundary
         self.i = 0  # iteration number
         self.rnorms = list()  # L2 norms of residuals
         self.fluct = list()   # fluctuation values -- ||dx|| / ||x||
@@ -57,7 +60,10 @@ class NewtonSolver(object):
         # solve J*dx = -r system and update x
         dx = self.la_solver(self.jac, -self.rvec)
         self.fluct.append(l2_norm(dx)/l2_norm(self.x))
-        self.x += dx*omega
+        if not self.fix_boundary:
+            self.x += dx*omega
+        else:
+            self.x[1:-1] += dx*omega
         self.i += 1
 
 if __name__=='__main__':
