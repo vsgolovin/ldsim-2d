@@ -14,293 +14,105 @@ def srh_R(n, p, n0, p0, tau_n, tau_p):
     R = (n*p - n0*p0) / ((n+n0)*tau_p + (p+p0)*tau_n)
     return R
 
-def srh_derivative(n, ndot, p, pdot, n0, p0, tau_n, tau_p):
+def srh_Rdot(n, ndot, p, pdot, n0, p0, tau_n, tau_p):
     """
-    Auxillary function for repetative calculations.
+    Shockley-Read-Hall recombination rate derivative with respect to
+    electrostatic potential or one of quasi-Fermi potentials.
     """
     u = n*p - n0*p0
-    v = (n+n0)*tau_p + (p+n0)*tau_n
+    v = (n+n0)*tau_p + (p+p0)*tau_n
     udot = ndot*p + n*pdot
     vdot = tau_p*ndot + tau_n*pdot
     Rdot = (udot*v - u*vdot) / v**2
     return Rdot
 
-def rad_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
+def rad_R(n, p, n0, p0, B):
     """
     Radiative recombination rate.
     """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
     R = B*(n*p-n0*p0)
     return R
 
-def rad_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
+def rad_Rdot(n, ndot, p, pdot, n0, p0, B):
     """
-    Radiative recombination rate derivative with respect to potential.
+    Radiative recombination rate derivative with respect to electrostatic
+    potential or one of quasi-Fermi potentials.
     """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
     Rdot = B*(n*pdot+p*ndot)
     return Rdot
 
-def rad_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
-    """
-    Radiative recombination rate derivative with respect to electron quasi
-    Fermi potential.
-    """
-    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    Rdot = B*p*ndot
-    return Rdot
-
-def rad_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B):
-    """
-    Radiative recombination rate derivative with respect to hole quasi Fermi
-    potential.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
-    Rdot = B*n*pdot
-    return Rdot
-
-def auger_R(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
+def auger_R(n, p, n0, p0, Cn, Cp):
     """
     Auger recombination rate.
     """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
     R = (Cn*n+Cp*p) * (n*p-n0*p0)
     return R
 
-def auger_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
+def auger_Rdot(n, ndot, p, pdot, n0, p0, Cn, Cp):
     """
-    Auger recombination rate derivative with respect to potential.
+    Auger recombination rate derivative with respect to electrostatic
+    potential or one of quasi-Fermi potentials.
     """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
     delta2 = 2*n*p - n0*p0
     Rdot = Cn*(delta2*ndot + n**2*pdot) + Cp*(delta2*pdot + p**2*ndot)
     return Rdot
 
-def auger_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
-    """
-    Auger recombination rate derivative with respect to electron quasi Fermi
-    potential.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    Rdot = ndot * (Cn*(2*n*p - n0*p0) + Cp*p**2)
-    return Rdot
-
-def auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp):
-    """
-    Auger recombination rate derivative with respect to electron quasi Fermi
-    potential.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
-    Rdot = pdot * (Cn*n**2 + Cp*(2*n*p - n0*p0))
-    return Rdot
-
-def stim_R(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr, wg_mode):
-    """
-    Stimulated recombination rate.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    n = np.min(np.stack([n, p]), axis=0)
-    g = g0*np.log(n/N_tr)
-    R = vg*g*S*wg_mode
-    return R
-
-def stim_dR_dpsi(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                 wg_mode):
-    """
-    Stimulated recombination rate derivative with respect to potential.
-    """
-    # choosing between n and p
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    stack = np.stack([n, p])
-    ix = np.argmin(stack, axis=0)
-    ix2 = np.arange(len(n))  # stack[ix, :] doesn't do the trick
-    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
-    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
-    n = stack[ix, ix2]
-    ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*S * g0*ndot/n
-    return Rdot
-
-def stim_dR_dphin(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                  wg_mode):
-    """
-    Stimulated recombination rate derivative with respect to electron quasi
-    Fermi potential.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    n = np.asarray(n)
-    p = np.asarray(p)
-    stack = np.stack([n, p])
-    ix = np.argmin(stack, axis=0)
-    ix2 = np.arange(len(n))
-    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
-    pdot = np.zeros_like(ndot)
-    n = stack[ix, ix2]
-    ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*S * g0*ndot/n
-    return Rdot
-
-def stim_dR_dphip(psi, phi_n, phi_p, S, Nc, Nv, Ec, Ev, Vt, vg, g0, N_tr,
-                  wg_mode):
-    """
-    Stimulated recombination rate derivative with respect to electron quasi
-    Fermi potential.
-    """
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    n = np.asarray(n)
-    p = np.asarray(p)
-    stack = np.stack([n, p])
-    ix = np.argmin(stack, axis=0)
-    ix2 = np.arange(len(n))
-    ndot = np.zeros_like(n)
-    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
-    n = stack[ix, ix2]
-    ndot = np.stack([ndot, pdot])[ix, ix2]
-    Rdot = vg * wg_mode*S * g0*ndot/n
-    return Rdot
-
 # testing
-test_err = 1e-2
+test_err = 1e-4
 
-def test_srh_derivative():
+def test_derivatives():
     # parameters
-    psi = 24
-    phi_n = 20
-    phi_p = 19
+    psi = -2
+    phi_n = 1.2
+    phi_p = 0.8
     Nc = 2.4e10
     Nv = 45e10
-    Ec = 55
+    Ec = 0.7
     Ev = -1
     Vt = 1.4
     n0 = 2e7
     p0 = 1e7
-    tau_n = 2
-    tau_p = 3
+    tau_n = 2e-9
+    tau_p = 3e-9
+    B = 1e10
+    Cn = 2e-30
+    Cp = 5e-30
 
-    # calculating SRH recombination rate derivative
-    # 1. by using `srh_derivative`
+    # calculating recombination rates' derivatives
+    # 1. by using implemented functions
     n = cc.n(psi, phi_n, Nc, Ec, Vt)
     ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
     p = cc.p(psi, phi_p, Nv, Ev, Vt)
     pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
-    Rdot = srh_derivative(n, ndot, p, pdot, n0, p0, tau_n, tau_p)
+    Rdot_srh = srh_Rdot(n, ndot, p, pdot, n0, p0, tau_n, tau_p)
+    Rdot_rad = rad_Rdot(n, ndot, p, pdot, n0, p0, B)
+    Rdot_aug = auger_Rdot(n, ndot, p, pdot, n0, p0, Cn, Cp)
 
     # 2. by using finite differences
-    psi_1 = psi*(1-1e-3)
-    psi_2 = psi*(1+1e-3)
+    psi_1 = psi*(1-1e-4)
+    psi_2 = psi*(1+1e-4)
     n1 = cc.n(psi_1, phi_n, Nc, Ec, Vt)
     p1 = cc.p(psi_1, phi_p, Nv, Ev, Vt)
-    R1 = srh_R(n1, p1, n0, p0, tau_n, tau_p)
     n2 = cc.n(psi_2, phi_n, Nc, Ec, Vt)
     p2 = cc.p(psi_2, phi_p, Nv, Ev, Vt)
+
+    errs = np.zeros(3, dtype=float)
+
+    R1 = srh_R(n1, p1, n0, p0, tau_n, tau_p)
     R2 = srh_R(n2, p2, n0, p0, tau_n, tau_p)
-    Rdot_fd = (R2-R1)/(psi_2-psi_1)
+    Rdot = (R2-R1)/(psi_2-psi_1)
+    errs[0] = np.abs(1-Rdot_srh/Rdot)
 
+    R1 = rad_R(n1, p1, n0, p0, B)
+    R2 = rad_R(n2, p2, n0, p0, B)
+    Rdot = (R2-R1)/(psi_2-psi_1)
+    errs[1] = np.abs(1-Rdot_rad/Rdot)
+
+    R1 = auger_R(n1, p1, n0, p0, Cn, Cp)
+    R2 = auger_R(n2, p2, n0, p0, Cn, Cp)
+    Rdot = (R2-R1)/(psi_2-psi_1)
+    errs[2] = np.abs(1-Rdot_aug/Rdot)
+    
     # checking results
-    err = abs(1-Rdot/Rdot_fd)
-    assert err < test_err
-
-def test_rad_derivatives():
-    psi = 24
-    phi_n = 20
-    phi_p = 19
-    Nc = 2.4e10
-    Nv = 45e10
-    Ec = 55
-    Ev = -1
-    Vt = 1.4
-    n0 = 1e6
-    p0 = 4e6
-    B = 1e-10
-
-    # psi
-    psi_1 = psi*0.999
-    psi_2 = psi*1.001
-    R1 = rad_R(psi_1, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    R2 = rad_R(psi_2, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    Rdot_fd = (R2-R1)/(psi_2-psi_1)
-    Rdot = rad_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    err_psi = abs(1-Rdot/Rdot_fd)
-
-    # phi_n
-    phi_n1 = phi_n*0.999
-    phi_n2 = phi_n*1.001
-    R1 = rad_R(psi, phi_n1, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    R2 = rad_R(psi, phi_n2, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    Rdot_fd = (R2-R1)/(phi_n2-phi_n1)
-    Rdot = rad_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    err_phin = abs(1-Rdot/Rdot_fd)
-
-    # phi_p
-    phi_p1 = phi_p*0.999
-    phi_p2 = phi_p*1.001
-    R1 = rad_R(psi, phi_n, phi_p1, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    R2 = rad_R(psi, phi_n, phi_p2, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    Rdot_fd = (R2-R1)/(phi_p2-phi_p1)
-    Rdot = rad_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, B)
-    err_phip = abs(1-Rdot/Rdot_fd)
-
-    # checking results
-    assert err_psi < test_err and err_phin < test_err and err_phip < test_err
-
-def test_auger_derivatives():
-    psi = 24
-    phi_n = 20
-    phi_p = 19
-    Nc = 2.4e10
-    Nv = 45e10
-    Ec = 55
-    Ev = -1
-    Vt = 1.2
-    n0 = 1e6
-    p0 = 4e6
-    Cn = 2e-30
-    Cp = 3e-30
-
-    # psi
-    psi_1 = psi*0.999
-    psi_2 = psi*1.001
-    R1 = auger_R(psi_1, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    R2 = auger_R(psi_2, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    Rdot_fd = (R2-R1)/(psi_2-psi_1)
-    Rdot = auger_dR_dpsi(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    err_psi = abs(1-Rdot/Rdot_fd)
-
-    # phi_n
-    phi_n1 = phi_n*0.999
-    phi_n2 = phi_n*1.001
-    R1 = auger_R(psi, phi_n1, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    R2 = auger_R(psi, phi_n2, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    Rdot_fd = (R2-R1)/(phi_n2-phi_n1)
-    Rdot = auger_dR_dphin(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    err_phin = abs(1-Rdot/Rdot_fd)
-
-    # phi_p
-    phi_p1 = phi_p*0.999
-    phi_p2 = phi_p*1.001
-    R1 = auger_R(psi, phi_n, phi_p1, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    R2 = auger_R(psi, phi_n, phi_p2, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    Rdot_fd = (R2-R1)/(phi_p2-phi_p1)
-    Rdot = auger_dR_dphip(psi, phi_n, phi_p, Nc, Nv, Ec, Ev, Vt, n0, p0, Cn, Cp)
-    err_phip = abs(1-Rdot/Rdot_fd)
-
-    # checking results
-    assert err_psi < test_err and err_phin < test_err and err_phip < test_err
+    print(errs)
+    assert (errs<test_err).all()
