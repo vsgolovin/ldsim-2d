@@ -3,6 +3,7 @@
 Class for a 1-dimensional model of a laser diode.
 """
 
+import warnings
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import solve_banded
@@ -22,7 +23,7 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'tau_p':units.t, 'B':1/(units.n*units.t), 
                'Cn':1/(units.n**2*units.t), 'Cp':1/(units.n**2*units.t),
                'eps':1, 'n_refr':1, 'ni':units.n, 'wg_mode':1/units.x,
-               'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_eq':units.V,
+               'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_bi':units.V,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
                'g0':1/units.x, 'N_tr':units.n}
 
@@ -312,7 +313,7 @@ class LaserDiode1D(object):
         sol = newton.NewtonSolver(f, fdot, Ef_i, la_fun)
         return sol
 
-    def solve_lcn(self, maxiter=100, fluct=1e-7, omega=1):
+    def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1):
         """
         Find potential distribution at zero external bias assuming local
         charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
@@ -323,16 +324,16 @@ class LaserDiode1D(object):
             Maximum number of Newton's method iterations.
         fluct : float
             Fluctuation of solution that is needed to stop iterating before
-            reaching `maxiter`.
+            reaching `maxiter` steps.
         omega : float
             Damping parameter.
 
         """
         sol = self.gen_lcn_solver()
-        while sol.i<maxiter:
-            sol.step(omega)
-            if sol.fluct[-1]<fluct:
-                break
+        sol.solve(maxiter, fluct, omega)
+        if sol.fluct[-1]>fluct:
+            warnings.warn('LaserDiode1D.solve_lcn(): fluctuation '+
+                         ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
 
         self.yin['psi_lcn'] = sol.x.copy()
         self.yin['n0'] = cc.n(psi=self.yin['psi_lcn'], phi_n=0,
@@ -374,6 +375,29 @@ class LaserDiode1D(object):
                                   inds=np.arange(1, len(psi_init)-1))
         return sol
 
+    def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1):
+        """
+        Calculate electrostatic potential distribution at equilibrium (zero
+        external bias). Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int
+            Maximum number of Newton's method iterations.
+        fluct : float
+            Fluctuation of solution that is needed to stop iterating before
+            reacing `maxiter` steps.
+        omega : float
+            Damping parameter.
+
+        """
+        sol = self.gen_equilibrium_solver()
+        sol.solve(maxiter, fluct, omega)
+        if sol.fluct[-1]>fluct:
+            warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation '+
+                         ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
+        self.yin['psi_bi'] = sol.x.copy()
+
 #%%
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -410,12 +434,10 @@ if __name__=='__main__':
     print('Complete.')
     print('Calculating built-in potential by solving Poisson\'s equation...',
           end=' ')
-    sol = ld.gen_equilibrium_solver()
-    for i in range(50):
-        sol.step()
-    print('Complete...')
+    ld.solve_equilibrium()
+    print('Complete.')
     ld.original_units()
-    psi = sol.x * units.V
+    psi = ld.yin['psi_bi']
     plt.figure('Equilibrium')
     plt.plot(x, ld.yin['Ec']-psi, lw=0.5, color='b')
     plt.plot(x, ld.yin['Ev']-psi, lw=0.5, color='b')

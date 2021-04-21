@@ -68,6 +68,26 @@ class NewtonSolver(object):
         self.x[self.inds] += dx*omega
         self.i += 1
 
+    def solve(self, maxiter=500, fluct=1e-7, omega=1.0):
+        """
+        Solve the problem by iterating at most `maxiter` steps (or until
+        solution fluctuation is below `fluct`).
+
+        Parameters
+        ----------
+        maxiter : int
+            Maximum number of iterations.
+        fluct : float
+            Fluctuation of solution needed to stop iterating.
+        omega : float
+            Damping parameter.
+
+        """
+        for _ in range(maxiter):
+            self.step(omega)
+            if self.fluct[-1]<fluct:
+                break
+
 if __name__=='__main__':
     # solving a simple nonlinear system
     import matplotlib.pyplot as plt
