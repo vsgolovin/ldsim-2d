@@ -369,8 +369,9 @@ class LaserDiode1D(object):
             return j
 
         la_fun = lambda A, b: solve_banded((1,1), A, b)
-        psi_init = self.yin['psi_lcn'].copy()
-        sol = newton.NewtonSolver(res, jac, psi_init, la_fun, True)
+        psi_init = self.yin['psi_lcn']
+        sol = newton.NewtonSolver(res, jac, psi_init, la_fun,
+                                  inds=np.arange(1, len(psi_init)-1))
         return sol
 
 #%%
