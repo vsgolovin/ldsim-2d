@@ -13,9 +13,9 @@ def solve_wg(x, n, lam, n_modes):
 
     Parameters
     ----------
-    x : np.ndarray
+    x : numpy.ndarray
         x coordinate.
-    n : np.ndarray
+    n : numpy.ndarray
         Refractive index values. `n.shape==x.shape`
     lam : number
         Wavelength (cm).
@@ -24,14 +24,13 @@ def solve_wg(x, n, lam, n_modes):
 
     Returns
     -------
-    n_eff : np.ndarray
+    n_eff : numpy.ndarray
         Calculated effective refractive index values.
-    modes : np.ndarray
+    modes : numpy.ndarray
         Calculated mode profiles.
 
     """
-
-    # creating matrix
+    # creating matrix A for the eigenvalue problem
     k0 = 2*np.pi / lam
     delta_x = x[1]-x[0]  # uniform mesh
     delta_chi2 = (delta_x*k0)**2
@@ -39,7 +38,7 @@ def solve_wg(x, n, lam, n_modes):
     off_diag = np.full(x[:-1].shape, 1/delta_chi2)
     A = diags([off_diag, main_diag, off_diag], [-1, 0, 1])
 
-    # solving eigenproblem
+    # solving the eigenproblem
     n_max = n.max()
     w, v = eigs(A, k=n_modes, which='SR', sigma=n_max**2)
 

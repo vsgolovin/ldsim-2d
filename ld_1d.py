@@ -13,6 +13,7 @@ import units
 import carrier_concentrations as cc
 import equilibrium as eq
 import newton
+import waveguide
 
 inp_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
               'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr']
@@ -89,6 +90,8 @@ class LaserDiode1D(object):
         self.photon_energy = const.h*const.c/lam
         self.ng = ng
         self.vg = const.c/ng
+        self.n_eff = None
+        self.gamma = None
 
         # parameters at mesh nodes
         self.yin = dict()  # values at interior nodes
@@ -109,48 +112,6 @@ class LaserDiode1D(object):
         self.xin = np.arange(0, d, step)
         self.xbn = (self.xin[1:]+self.xin[:-1]) / 2
         self.calc_all_params()
-
-    def calculate_param(self, p, nodes='internal'):
-        """
-        Calculate values of parameter `p` at all mesh nodes.
-
-        Parameters
-        ----------
-        p : str
-            Parameter name.
-        nodes : str, optional
-            Which mesh nodes -- `internal` (`i`) or `boundary` (`b`) -- should
-            the values be calculated at. The default is 'internal'.
-
-        Raises
-        ------
-        Exception
-            If `p` is an unknown parameter name.
-
-        """
-        # picking nodes
-        if nodes=='internal' or nodes=='i':
-            x = self.xin
-            d = self.yin
-        elif nodes=='boundary' or nodes=='b':
-            x = self.xbn
-            d = self.ybn
-
-        # calculating values
-        dtype = np.dtype('float64')
-        if p in inp_params:
-            y = np.array([self.slc.get_value(p, xi) for xi in x], dtype=dtype)
-        elif p=='Eg':
-            Ec = np.array([self.slc.get_value('Ec', xi) for xi in x], dtype=dtype)
-            Ev = np.array([self.slc.get_value('Ev', xi) for xi in x], dtype=dtype)
-            y = Ec-Ev
-        elif p=='C_dop':
-            Nd = np.array([self.slc.get_value('Nd', xi) for xi in x], dtype=dtype)
-            Na = np.array([self.slc.get_value('Na', xi) for xi in x], dtype=dtype)
-            y = Nd-Na
-        else:
-            raise Exception('Error: unknown parameter %s' % p)
-        d[p] = y  # modifies self.yin or self.ybn
 
     def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7, step_uni=5e-8,
                             param='Eg', sigma=100e-7, y_ext=[0, 0]):
@@ -215,12 +176,56 @@ class LaserDiode1D(object):
         self.xbn = (self.xin[1:] + self.xin[:-1]) / 2
         self.calc_all_params()
 
+    def calculate_param(self, p, nodes='internal'):
+        """
+        Calculate values of parameter `p` at all mesh nodes.
+
+        Parameters
+        ----------
+        p : str
+            Parameter name.
+        nodes : str, optional
+            Which mesh nodes -- `internal` (`i`) or `boundary` (`b`) -- should
+            the values be calculated at. The default is 'internal'.
+
+        Raises
+        ------
+        Exception
+            If `p` is an unknown parameter name.
+
+        """
+        # picking nodes
+        if nodes=='internal' or nodes=='i':
+            x = self.xin
+            d = self.yin
+        elif nodes=='boundary' or nodes=='b':
+            x = self.xbn
+            d = self.ybn
+
+        # calculating values
+        dtype = np.dtype('float64')
+        if p in inp_params:
+            y = np.array([self.slc.get_value(p, xi) for xi in x], dtype=dtype)
+        elif p=='Eg':
+            Ec = np.array([self.slc.get_value('Ec', xi) for xi in x], dtype=dtype)
+            Ev = np.array([self.slc.get_value('Ev', xi) for xi in x], dtype=dtype)
+            y = Ec-Ev
+        elif p=='C_dop':
+            Nd = np.array([self.slc.get_value('Nd', xi) for xi in x], dtype=dtype)
+            Na = np.array([self.slc.get_value('Na', xi) for xi in x], dtype=dtype)
+            y = Nd-Na
+        else:
+            raise Exception('Error: unknown parameter %s' % p)
+        d[p] = y  # modifies self.yin or self.ybn
+
     def calc_all_params(self):
         "Calculate all parameters' values at mesh nodes."
         for p in inp_params+['Eg', 'C_dop']:
             self.calculate_param(p, 'i')
         for p in ybn_params:
             self.calculate_param(p, 'b')
+        if self.n_eff is not None:  # waveguide problem has been solved
+            self._calc_wg_mode()
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
@@ -398,10 +403,64 @@ class LaserDiode1D(object):
                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
         self.yin['psi_bi'] = sol.x.copy()
 
-#%%
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=[0, 0]):
+        ""
+        # generating refractive index profile
+        x = np.arange(0, self.slc.get_thickness(), step)
+        n = np.array([self.slc.get_value('n_refr', xi) for xi in x])
+        inds = np.array([self.slc.get_index(xi) for xi in x], dtype=int)
+
+        # removing boundary layers (if needed)
+        i1, i2 = remove_layers
+        to_remove = self.slc.inds[:i1]
+        if i2>0:
+            to_remove += self.slc.inds[-i2:]
+        ix = np.array([True]*len(inds))
+        for layer_index in to_remove:
+            ix = np.logical_and(ix, inds!=layer_index)
+        x = x[ix]
+        n = n[ix]
+        inds = inds[ix]
+
+        # active region location
+        ar_ix = np.array([True]*len(inds))
+        for layer_index in self.ar_inds:
+            ar_ix = np.logical_and(ar_ix, inds==layer_index)
+
+        # solving the eigenvalue problem
+        n_eff_values, modes = waveguide.solve_wg(x, n, self.lam, n_modes)
+        # and picking one mode with the largest confinement factor (Gamma)
+        gammas = np.zeros(n_modes)
+        for i in range(n_modes):
+            mode = modes[:, i]
+            gammas[i] = (mode*step)[ar_ix].sum()  # modes are normalized
+        i = np.argmax(gammas)
+        mode = modes[:, i]
+
+        # storing results
+        self.n_eff = n_eff_values[i]
+        self.gamma = gammas[i]
+        self.wgm_fun = interp1d(x, mode, bounds_error=False,
+                                fill_value=0)
+        self.wgm_fun_dls = interp1d(x/units.x, mode*units.x,
+                                    bounds_error=False, fill_value=0)
+        self._calc_wg_mode()
+
+        return x, n, mode
+
+    def _calc_wg_mode(self):
+        "Calculate normalized laser mode profile and store in `self.yin`."
+        assert self.n_eff is not None
+        if self.is_dimensionless:
+            self.yin['wg_mode'] = self.wgm_fun_dls(self.xin)
+        else:
+            self.yin['wg_mode'] = self.wgm_fun(self.xin)
+
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     from sample_slice import sl
+
+    plt.rc('lines', linewidth=0.7)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
     ld = LaserDiode1D(slc=sl, ar_inds=3,
@@ -417,12 +476,12 @@ if __name__=='__main__':
     print('Complete.')
     x = ld.xin*1e4
     plt.figure('Flat bands')
-    plt.plot(x, ld.yin['Ec'], lw=0.5, color='b')
-    plt.plot(x, ld.yin['Ev'], lw=0.5, color='b')
+    plt.plot(x, ld.yin['Ec'], color='b')
+    plt.plot(x, ld.yin['Ev'], color='b')
     plt.xlabel(r'$x$ ($\mu$m)')
     plt.ylabel('Energy (eV)', color='b')
     plt.twinx()
-    plt.plot(x, ld.yin['n_refr'], lw=0.5, ls=':', color='g', marker='x',
+    plt.plot(x, ld.yin['n_refr'], ls=':', color='g', marker='x',
              ms=3)
     plt.ylabel('Refractive index', color='g')
 
@@ -439,7 +498,19 @@ if __name__=='__main__':
     ld.original_units()
     psi = ld.yin['psi_bi']
     plt.figure('Equilibrium')
-    plt.plot(x, ld.yin['Ec']-psi, lw=0.5, color='b')
-    plt.plot(x, ld.yin['Ev']-psi, lw=0.5, color='b')
+    plt.plot(x, ld.yin['Ec']-psi, color='b')
+    plt.plot(x, ld.yin['Ev']-psi, color='b')
     plt.xlabel(r'$x$ ($\mu$m)')
     plt.ylabel('Energy (eV)')
+
+    # 3. waveguide
+    print('Calculating vertical mode profile...', end=' ')
+    ld.solve_waveguide(remove_layers=[1, 1])
+    print('Complete.')
+    plt.figure('Waveguide')
+    plt.plot(x, ld.yin['wg_mode']/1e4, color='b')
+    plt.xlabel(r'$x$ ($\mu$m)')
+    plt.ylabel('Mode intensity', color='b')
+    plt.twinx()
+    plt.plot(x, ld.yin['n_refr'], color='g')
+    plt.ylabel('Refractive index', color='g')
