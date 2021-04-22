@@ -31,12 +31,11 @@ def bernoulli_dot(x):
     return y
 
 #%% Scharfetter-Gummel expressions for current density and its derivatives
-def SG_jn(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
+def SG_jn(psi_1, psi_2, n1, n2, h, Vt, q, mu_n):
     "Scharfetter-Gummel formula for electron current density."
     B = bernoulli
-    j = -q*mu_n*Vt / (x2-x1) \
-        *( Nc*np.exp((psi_1-phi_n1-Ec)/Vt) * B(-(psi_2-psi_1)/Vt)
-          -Nc*np.exp((psi_2-phi_n2-Ec)/Vt) * B( (psi_2-psi_1)/Vt) )
+    j = -q*mu_n*Vt / h \
+        *( n1*B(-(psi_2-psi_1)/Vt)- n2*B(+(psi_2-psi_1)/Vt) )
     return j
 
 def SG_djn_dpsi1(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):

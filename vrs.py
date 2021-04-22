@@ -12,16 +12,12 @@ import recombination as rec
 
 #%% 1. Poisson's equation
 
-def poisson_res(psi, phi_n, phi_p, x, xm, eps, eps_0,
-                q, C_dop, Nc, Nv, Ec, Ev, Vt):
-    n = cc.n(psi, phi_n, Nc, Ec, Vt)
-    p = cc.p(psi, phi_p, Nv, Ev, Vt)
-    h = x[1:]-x[:-1]
-    lhs = eps[1:-1] * (  1/h[1:  ]          *psi[2:  ]
+def poisson_res(psi, n, p, h, w, eps, eps_0, q, C_dop):
+    lhs = -eps[1:-1] * (  1/h[1:  ]          *psi[2:  ]
                        -(1/h[1:  ]+1/h[:-1])*psi[1:-1]
                        + 1/h[ :-1]          *psi[ :-2] )
-    rhs = q/eps_0 * (C_dop[1:-1]-n[1:-1]+p[1:-1]) * (xm[1:]-xm[:-1])
-    r = lhs+rhs
+    rhs = q/eps_0 * (C_dop[1:-1]-n[1:-1]+p[1:-1]) * w 
+    r = -lhs+rhs
     return r
 
 def poisson_dF_dpsi(psi, phi_n, phi_p, x, xm, eps, eps_0,

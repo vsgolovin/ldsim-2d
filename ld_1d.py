@@ -14,6 +14,7 @@ import carrier_concentrations as cc
 import equilibrium as eq
 import newton
 import waveguide
+import vrs
 
 inp_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
               'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr']
@@ -26,6 +27,7 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'eps':1, 'n_refr':1, 'ni':units.n, 'wg_mode':1/units.x,
                'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_bi':units.V,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
+               'n':units.n, 'p':units.n,
                'g0':1/units.x, 'N_tr':units.n}
 
 class LaserDiode1D(object):
@@ -111,6 +113,7 @@ class LaserDiode1D(object):
             raise Exception("Mesh step (%f) is too large." % step)
         self.xin = np.arange(0, d, step)
         self.xbn = (self.xin[1:]+self.xin[:-1]) / 2
+        self.npoints = len(self.xin)
         self.calc_all_params()
 
     def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7, step_uni=5e-8,
@@ -174,6 +177,7 @@ class LaserDiode1D(object):
             xi += step_min + k*(1-fg_fun(xi))
         self.xin = np.array(new_grid)
         self.xbn = (self.xin[1:] + self.xin[:-1]) / 2
+        self.npoints = len(self.xin)
         self.calc_all_params()
 
     def calculate_param(self, p, nodes='internal'):
@@ -402,6 +406,7 @@ class LaserDiode1D(object):
             warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation '+
                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
         self.yin['psi_bi'] = sol.x.copy()
+        self._update_solution(sol.x)
 
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=[0, 0]):
         ""
@@ -456,11 +461,67 @@ class LaserDiode1D(object):
         else:
             self.yin['wg_mode'] = self.wgm_fun(self.xin)
 
+    def _update_solution(self, v):
+        "Update `self.sol` using calculated potentials vector `v`."
+        if len(v)==3*(self.npoints-2):  # [psi, phi_n, phi_p], all without BC
+            m = self.npoints-2
+            self.sol['psi'] = v[:m]
+            self.sol['phi_n'] = v[m:2*m]
+            self.sol['phi_p'] = v[2*m:]
+        else:
+            assert len(v)==self.npoints
+            self.sol['psi'] = v.copy()
+            self.sol['phi_n'] = np.zeros_like(v)
+            self.sol['phi_p'] = np.zeros_like(v)
+        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
+                             self.yin['Nc'], self.yin['Ec'], self.Vt)
+        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
+                             self.yin['Nv'], self.yin['Ev'], self.Vt)
+
+    def transport_init(self, voltage, psi_init=None, phi_n_init=None,
+                       phi_p_init=None):
+        "Initialize carrier transport problem at some external voltage."
+        self.iterations = 0
+        self.fluct = list()
+
+        # copying passed initial guesses
+        for arr, key in zip([psi_init, phi_n_init, phi_p_init],
+                            ['psi'], ['phi_n'], ['phi_p']):
+            if arr is not None:
+                assert len(arr)==self.npoints
+                self.sol[key] = arr.copy()
+
+        # boundary conditions
+        self.sol['psi'][0] = self.yin['psi_bi']-voltage/2
+        self.sol['psi'][-1] = self.yin['psi_bi']+voltage/2
+        self.sol['phi_n'][0] = -voltage/2
+        self.sol['phi_n'][-1] = voltage/2
+        self.sol['phi_p'][0] = -voltage/2
+        self.sol['phi_p'][-1] = voltage/2
+
+    def transport_step(self, omega=1.0):
+        ""
+        m = self.npoints-2
+        h = self.xin[1:]-self.xin[:-1]  # npoints-1
+        w = self.xbn[1:]-self.xbn[:-1]  # npoints-2, or m
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        phi_p = self.sol['phi_p']
+        n = self.sol['n']
+        p = self.sol['p']
+
+        # calculating residual
+        rvec = np.zeros(m*3)  # [psi, phi_n, phi_p], di
+        r1 = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'], self.eps_0,
+                             self.q, self.yin['C_dop'])
+        pass
+
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     from sample_slice import sl
 
     plt.rc('lines', linewidth=0.7)
+    plt.rc('figure.subplot', left=0.15, right=0.85)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
     ld = LaserDiode1D(slc=sl, ar_inds=3,
@@ -501,7 +562,12 @@ if __name__=='__main__':
     plt.plot(x, ld.yin['Ec']-psi, color='b')
     plt.plot(x, ld.yin['Ev']-psi, color='b')
     plt.xlabel(r'$x$ ($\mu$m)')
-    plt.ylabel('Energy (eV)')
+    plt.ylabel('Energy (eV)', color='b')
+    plt.twinx()
+    plt.plot(x, ld.sol['n'], color='g')
+    plt.plot(x, ld.sol['p'], color='g', ls='--')
+    plt.yscale('log')
+    plt.ylabel('Carrier densities (cm$^{-3}$)', color='g')
 
     # 3. waveguide
     print('Calculating vertical mode profile...', end=' ')
