@@ -15,6 +15,8 @@ import equilibrium as eq
 import newton
 import waveguide
 import vrs
+import flux
+import recombination as rec
 
 inp_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
               'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr']
@@ -486,14 +488,16 @@ class LaserDiode1D(object):
 
         # copying passed initial guesses
         for arr, key in zip([psi_init, phi_n_init, phi_p_init],
-                            ['psi'], ['phi_n'], ['phi_p']):
+                            ['psi', 'phi_n', 'phi_p']):
             if arr is not None:
                 assert len(arr)==self.npoints
                 self.sol[key] = arr.copy()
 
         # boundary conditions
-        self.sol['psi'][0] = self.yin['psi_bi']-voltage/2
-        self.sol['psi'][-1] = self.yin['psi_bi']+voltage/2
+        if self.is_dimensionless:
+            voltage /= units.V
+        self.sol['psi'][0] = self.yin['psi_bi'][0]-voltage/2
+        self.sol['psi'][-1] = self.yin['psi_bi'][-1]+voltage/2
         self.sol['phi_n'][0] = -voltage/2
         self.sol['phi_n'][-1] = voltage/2
         self.sol['phi_p'][0] = -voltage/2
@@ -503,17 +507,49 @@ class LaserDiode1D(object):
         ""
         m = self.npoints-2
         h = self.xin[1:]-self.xin[:-1]  # npoints-1
-        w = self.xbn[1:]-self.xbn[:-1]  # npoints-2, or m
+        w = self.xbn[1:]-self.xbn[:-1]  # npoints-2 (m)
         psi = self.sol['psi']
         phi_n = self.sol['phi_n']
         phi_p = self.sol['phi_p']
         n = self.sol['n']
         p = self.sol['p']
 
-        # calculating residual
-        rvec = np.zeros(m*3)  # [psi, phi_n, phi_p], di
-        r1 = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'], self.eps_0,
-                             self.q, self.yin['C_dop'])
+        # calculating residuals
+        rvec = np.zeros(m*3)
+
+        # Poisson's equation
+        rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
+                                   self.eps_0, self.q, self.yin['C_dop'])
+
+        # current continuity equations
+        B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)   # npoints-1
+        B_minus = flux.bernoulli(-(psi[1:]-psi[:-1])/self.Vt)
+        jn = flux.SG_jn(n, B_plus, B_minus, h,
+                        self.Vt, self.q, self.ybn['mu_n'])
+        jp = flux.SG_jp(p, B_plus, B_minus, h,
+                        self.Vt, self.q, self.ybn['mu_p'])
+        R_srh = rec.srh_R(n[1:-1], p[1:-1],
+                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                          self.yin['tau_n'][1:-1], self.yin['tau_p'][1:-1])
+        R_rad = rec.rad_R(n[1:-1], p[1:-1],
+                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                          self.yin['B'][1:-1])
+        R_aug = rec.auger_R(n[1:-1], p[1:-1],
+                            self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                            self.yin['Cn'][1:-1], self.yin['Cp'][1:-1])
+        R = R_srh + R_rad + R_aug
+        rvec[m:2*m] = -self.q*(-R)*w - (jn[1:]-jn[:-1])
+        rvec[2*m:]  =  self.q*(-R)*w - (jp[1:]-jp[:-1])
+
+        # calculating Jacobian
+        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
+                             self.yin['Ec'], self.Vt)
+        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
+                               self.yin['Ec'], self.Vt)
+        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'],
+                             self.yin['Ev'], self.Vt)
+        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
+                               self.yin['Ev'], self.Vt)
         pass
 
 if __name__=='__main__':
@@ -580,3 +616,16 @@ if __name__=='__main__':
     plt.twinx()
     plt.plot(x, ld.yin['n_refr'], color='g')
     plt.ylabel('Refractive index', color='g')
+
+    # 4. forward bias
+    ld.make_dimensionless()
+    ld.transport_init(0.1)
+    ld.transport_step()
+    ld.original_units()
+    plt.figure('Small forward bias')
+    plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='b')
+    plt.plot(x, ld.yin['Ev']-ld.sol['psi'], color='b')
+    plt.plot(x, -ld.sol['phi_n'], color='g', ls=':')
+    plt.plot(x, -ld.sol['phi_p'], color='r', ls=':')
+    plt.xlabel(r'$x$ ($\mu$m)')
+    plt.ylabel('Energy (eV)')

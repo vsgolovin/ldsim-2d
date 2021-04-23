@@ -31,11 +31,11 @@ def bernoulli_dot(x):
     return y
 
 #%% Scharfetter-Gummel expressions for current density and its derivatives
-def SG_jn(psi_1, psi_2, n1, n2, h, Vt, q, mu_n):
+def SG_jn(n, B_plus, B_minus, h, Vt, q, mu_n):
     "Scharfetter-Gummel formula for electron current density."
-    B = bernoulli
-    j = -q*mu_n*Vt / h \
-        *( n1*B(-(psi_2-psi_1)/Vt)- n2*B(+(psi_2-psi_1)/Vt) )
+    n1 = n[:-1]
+    n2 = n[1:]
+    j = -q*mu_n*Vt/h * (n1*B_minus-n2*B_plus)
     return j
 
 def SG_djn_dpsi1(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
@@ -70,12 +70,11 @@ def SG_djn_dphin2(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
             * Nc*np.exp((psi_2-phi_n2-Ec)/Vt)
     return jdot
 
-def SG_jp(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
+def SG_jp(p, B_plus, B_minus, h, Vt, q, mu_p):
     "Scharfetter-Gummel formula for hole current density."
-    B = bernoulli
-    j =  q*mu_p*Vt / (x2-x1) \
-        *( Nv*np.exp((-psi_1+phi_p1+Ev)/Vt) * B( (psi_2-psi_1)/Vt)
-          -Nv*np.exp((-psi_2+phi_p2+Ev)/Vt) * B(-(psi_2-psi_1)/Vt) )
+    p1 = p[:-1]
+    p2 = p[1:]
+    j =  q*mu_p*Vt/h * (p1*B_plus - p2*B_minus)
     return j
 
 def SG_djp_dpsi1(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
