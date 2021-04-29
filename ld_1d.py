@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import solve_banded
+from scipy import sparse
 from slice_1d import Slice
 import constants as const
 import units
@@ -465,11 +466,11 @@ class LaserDiode1D(object):
 
     def _update_solution(self, v):
         "Update `self.sol` using calculated potentials vector `v`."
-        if len(v)==3*(self.npoints-2):  # [psi, phi_n, phi_p], all without BC
+        if len(v)==3*(self.npoints-2):  # change in psi, phi_n, phi_p
             m = self.npoints-2
-            self.sol['psi'] = v[:m]
-            self.sol['phi_n'] = v[m:2*m]
-            self.sol['phi_p'] = v[2*m:]
+            self.sol['psi'][1:-1] += v[:m]
+            self.sol['phi_n'][1:-1] += v[m:2*m]
+            self.sol['phi_p'][1:-1] += v[2*m:]
         else:
             assert len(v)==self.npoints
             self.sol['psi'] = v.copy()
@@ -550,7 +551,89 @@ class LaserDiode1D(object):
                              self.yin['Ev'], self.Vt)
         dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
                                self.yin['Ev'], self.Vt)
-        pass
+        j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w, self.yin['eps'],
+                                  self.eps_0, self.q)
+        j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
+        j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
+        dR_dpsi = rec.rad_Rdot(n[1:-1], dn_dpsi[1:-1],
+                               p[1:-1], dp_dpsi[1:-1], 
+                               self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                               self.yin['B'][1:-1])
+        dR_dphin = rec.rad_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                                self.yin['B'][1:-1])
+        dR_dphip = rec.rad_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                                self.yin['B'][1:-1])
+        Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)  # m+1
+        Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
+        djn_dpsi1 = flux.SG_djn_dpsi1(n, dn_dpsi, B_plus, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dpsi2 = flux.SG_djn_dpsi2(n, dn_dpsi, B_plus, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dphin1 = flux.SG_djn_dphin1(dn_dphin[:-1], B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+        djn_dphin2 = flux.SG_djn_dphin2(dn_dphin[1:], B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+
+        j11 = sparse.spdiags(j11, [1, 0, -1], m, m)
+        j12 = sparse.spdiags(j12, [0,], m, m)
+        j13 = sparse.spdiags(j13, [0,], m, m)
+        J1 = sparse.hstack([j11, j12, j13])
+
+        j21 = np.zeros((3, m))
+        j21[0, 1:] = -djn_dpsi2[1:-1]
+        j21[1, :] = self.q*dR_dpsi*w - (djn_dpsi1[1:]-djn_dpsi2[:-1])
+        j21[2, :-1] = djn_dpsi1[1:-1]
+
+        j22 = np.zeros((3, m))
+        j22[0, 1:] = -djn_dphin2[1:-1]
+        j22[1, :] = self.q*dR_dphin*w - (djn_dphin1[1:]-djn_dphin2[:-1])
+        j22[2, :-1] = djn_dphin1[1:-1]
+
+        j23 = np.zeros(m)
+        j23[:] = self.q*dR_dphip*w
+
+        j21 = sparse.spdiags(j21, [1, 0, -1], m, m)
+        j22 = sparse.spdiags(j22, [1, 0, -1], m, m)
+        j23 = sparse.spdiags(j23, [0,], m, m)
+        J2 = sparse.hstack([j21, j22, j23])
+
+        djp_dpsi1 = flux.SG_djp_dpsi1(p, dp_dpsi, B_plus, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dpsi2 = flux.SG_djp_dpsi2(p, dp_dpsi, B_plus, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dphip1 = flux.SG_djp_dphip1(dp_dphip[:-1], B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+        djp_dphip2 = flux.SG_djp_dphip2(dp_dphip[1:], B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+
+        j31 = np.zeros((3, m))
+        j31[0, 1:] = -djp_dpsi2[1:-1]
+        j31[1, :] = -self.q*dR_dpsi*w - (djp_dpsi1[1:]-djp_dpsi2[:-1])
+        j31[2, :-1] = djp_dpsi1[1:-1]
+
+        j32 = np.zeros(m)
+        j32[:] = -self.q*dR_dphin*w
+
+        j33 = np.zeros((3, m))
+        j33[0, 1:] = -djp_dphip2[1:-1]
+        j33[1, :] = -self.q*dR_dphip*w - (djp_dphip1[1:]-djp_dphip2[:-1])
+        j33[2, :-1] = djp_dphip1[1:-1]
+
+        j31 = sparse.spdiags(j31, [1, 0, -1], m, m)
+        j32 = sparse.spdiags(j32, [0,], m, m)
+        j33 = sparse.spdiags(j33, [1, 0, -1], m, m)
+        J3 = sparse.hstack([j31, j32, j33])
+
+        J = sparse.vstack([J1, J2, J3])
+        J = J.tocsc()
+        dx = sparse.linalg.spsolve(J, -rvec)
+        self._update_solution(dx*omega)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -620,7 +703,8 @@ if __name__=='__main__':
     # 4. forward bias
     ld.make_dimensionless()
     ld.transport_init(0.1)
-    ld.transport_step()
+    for _ in range(20):
+        ld.transport_step(1e-3)
     ld.original_units()
     plt.figure('Small forward bias')
     plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='b')

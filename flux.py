@@ -10,8 +10,8 @@ def bernoulli(x):
     if isinstance(x, np.ndarray):
         with np.errstate(divide='ignore', invalid='ignore'):
             y = np.true_divide(x, (np.exp(x)-1))
-            y[np.where(x==0)] = 1
-    elif x==0:
+            y[np.where(np.abs(x)<1e-12)] = 1
+    elif np.abs(x)<1e-12:
         y = 1
     else:
         y = x/(np.exp(x)-1)
@@ -23,8 +23,8 @@ def bernoulli_dot(x):
         denom = (np.exp(x)-1)**2
         with np.errstate(divide='ignore', invalid='ignore'):
             y = np.true_divide(enum, denom)
-            y[np.where(x==0)] = -0.5
-    elif x==0:
+            y[np.where(np.abs(x)<1e-12)] = -0.5
+    elif np.abs(x)<1e-12:
         y = -0.5
     else:
         y = (np.exp(x)-x*np.exp(x)-1) / (np.exp(x)-1)**2
@@ -38,36 +38,28 @@ def SG_jn(n, B_plus, B_minus, h, Vt, q, mu_n):
     j = -q*mu_n*Vt/h * (n1*B_minus-n2*B_plus)
     return j
 
-def SG_djn_dpsi1(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    B = bernoulli
-    Bdot = bernoulli_dot
-    n1 = Nc*np.exp((psi_1-phi_n1-Ec)/Vt)
-    n2 = Nc*np.exp((psi_2-phi_n2-Ec)/Vt)
-    jdot = -q*mu_n/(x2-x1) * ( n1*( Bdot(-(psi_2-psi_1)/Vt)
-                                   +   B(-(psi_2-psi_1)/Vt))
-                              +n2*  Bdot( (psi_2-psi_1)/Vt) )
+def SG_djn_dpsi1(n, ndot, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                 Vt, q, mu_n):
+    n1 = n[:-1]
+    n2 = n[1:]
+    ndot_1 = ndot[:-1]
+    jdot = -q*mu_n/h * (Bdot_minus*n1 + B_minus*ndot_1*Vt + Bdot_plus*n2)
     return jdot
 
-def SG_djn_dpsi2(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    B = bernoulli
-    Bdot = bernoulli_dot
-    n1 = Nc*np.exp((psi_1-phi_n1-Ec)/Vt)
-    n2 = Nc*np.exp((psi_2-phi_n2-Ec)/Vt)
-    jdot = q*mu_n/(x2-x1) * ( n1*  Bdot(-(psi_2-psi_1)/Vt)
-                             +n2*(    B( (psi_2-psi_1)/Vt)
-                                  +Bdot( (psi_2-psi_1)/Vt)))
+def SG_djn_dpsi2(n, ndot, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                 Vt, q, mu_n):
+    n1 = n[:-1]
+    n2 = n[1:]
+    ndot_2 = ndot[1:]
+    jdot = q*mu_n/h * (Bdot_minus*n1 + Bdot_plus*n2 + B_plus*ndot_2*Vt)
     return jdot
 
-def SG_djn_dphin1(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    B = bernoulli
-    jdot = q*mu_n/(x2-x1) * B(-(psi_2-psi_1)/Vt) \
-           * Nc*np.exp((psi_1-phi_n1-Ec)/Vt)
+def SG_djn_dphin1(ndot, B_minus, h, Vt, q, mu_n):
+    jdot = -q*mu_n*Vt/h * B_minus * ndot
     return jdot
 
-def SG_djn_dphin2(psi_1, psi_2, phi_n1, phi_n2, x1, x2, Nc, Ec, Vt, q, mu_n):
-    B = bernoulli
-    jdot = -q*mu_n/(x2-x1) * B((psi_2-psi_1)/Vt) \
-            * Nc*np.exp((psi_2-phi_n2-Ec)/Vt)
+def SG_djn_dphin2(ndot, B_plus, h, Vt, q, mu_n):
+    jdot = q*mu_n*Vt/h * B_plus * ndot
     return jdot
 
 def SG_jp(p, B_plus, B_minus, h, Vt, q, mu_p):
@@ -77,36 +69,28 @@ def SG_jp(p, B_plus, B_minus, h, Vt, q, mu_p):
     j =  q*mu_p*Vt/h * (p1*B_plus - p2*B_minus)
     return j
 
-def SG_djp_dpsi1(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
-    B = bernoulli
-    Bdot = bernoulli_dot
-    p1 = Nv*np.exp((-psi_1+phi_p1+Ev)/Vt)
-    p2 = Nv*np.exp((-psi_2+phi_p2+Ev)/Vt)
-    jdot = -q*mu_p/(x2-x1) * ( p1*( Bdot( (psi_2-psi_1)/Vt)
-                                   +   B( (psi_2-psi_1)/Vt))
-                              +p2*  Bdot(-(psi_2-psi_1)/Vt) )
+def SG_djp_dpsi1(p, pdot, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                 Vt, q, mu_p):
+    p1 = p[:-1]
+    p2 = p[1:]
+    pdot_1 = pdot[:-1]
+    jdot = q*mu_p/h * (-Bdot_plus*p1+B_plus*pdot_1*Vt-Bdot_minus*p2)
     return jdot
 
-def SG_djp_dpsi2(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
-    B = bernoulli
-    Bdot = bernoulli_dot
-    p1 = Nv*np.exp((-psi_1+phi_p1+Ev)/Vt)
-    p2 = Nv*np.exp((-psi_2+phi_p2+Ev)/Vt)
-    jdot =  q*mu_p/(x2-x1) * ( p1*  Bdot( (psi_2-psi_1)/Vt)
-                              +p2*( Bdot(-(psi_2-psi_1)/Vt)
-                                   +   B(-(psi_2-psi_1)/Vt)))
+def SG_djp_dpsi2(p, pdot, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                 Vt, q, mu_p):
+    p1 = p[:-1]
+    p2 = p[1:]
+    pdot_2 = pdot[1:]
+    jdot = q*mu_p/h * (Bdot_plus*p1+Bdot_minus*p2-B_minus*pdot_2*Vt)
     return jdot
 
-def SG_djp_dphip1(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
-    B = bernoulli
-    jdot =  q*mu_p/(x2-x1) * Nv*np.exp((-psi_1+phi_p1+Ev)/Vt) \
-            * B( (psi_2-psi_1)/Vt)
+def SG_djp_dphip1(pdot, B_plus, h, Vt, q, mu_p):
+    jdot = q*mu_p*Vt/h * B_plus * pdot
     return jdot
 
-def SG_djp_dphip2(psi_1, psi_2, phi_p1, phi_p2, x1, x2, Nv, Ev, Vt, q, mu_p):
-    B = bernoulli
-    jdot = -q*mu_p/(x2-x1) * Nv*np.exp((-psi_2+phi_p2+Ev)/Vt) \
-            * B(-(psi_2-psi_1)/Vt)
+def SG_djp_dphip2(pdot, B_minus, h, Vt, q, mu_p):
+    jdot = -q*mu_p*Vt/h * B_minus * pdot
     return jdot
 
 

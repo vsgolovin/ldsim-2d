@@ -20,31 +20,21 @@ def poisson_res(psi, n, p, h, w, eps, eps_0, q, C_dop):
     r = -lhs+rhs
     return r
 
-def poisson_dF_dpsi(psi, phi_n, phi_p, x, xm, eps, eps_0,
-                    q, C_dop, Nc, Nv, Ec, Ev, Vt):
-    m = len(x)
-    h = x[1:]-x[:-1]  # (m-1)
-    ndot = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
-    pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
-
-    # Jacobian in tridiagonal form
-    J = np.zeros((3, m-2))  # excluding boundary nodes
+def poisson_dF_dpsi(ndot, pdot, h, w, eps, eps_0, q):
+    m = len(ndot)-2  # number of inner nodes
+    J = np.zeros((3, m))  # Jacobian in tridiagonal form
     J[0, 1:  ] =  eps[1:-2] / h[1:-1]
     J[1,  :  ] = -eps[1:-1] * (1/h[1:]+1/h[:-1]) \
-                 + q/eps_0 * (xm[1:]-xm[:-1]) * (pdot[1:-1] - ndot[1:-1])
+                 + q/eps_0 * (pdot[1:-1] - ndot[1:-1]) * w
     J[2,  :-1] =  eps[2:-1] / h[1:-1]
     return J
 
-def poisson_dF_dphin(psi, phi_n, phi_p, x, xm, eps, eps_0,
-                     q, C_dop, Nc, Nv, Ec, Ev, Vt):
-    ndot = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
-    J = -q * (xm[1:]-xm[:-1]) * ndot[1:-1]
+def poisson_dF_dphin(ndot, w, eps_0, q):
+    J = -q/eps_0 * ndot[1:-1] * w
     return J
 
-def poisson_dF_dphip(psi, phi_n, phi_p, x, xm, eps, eps_0,
-                     q, C_dop, Nc, Nv, Ec, Ev, Vt):
-    pdot = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
-    J =  q * (xm[1:]-xm[:-1]) * pdot[1:-1]
+def poisson_dF_dphip(pdot, w, eps_0, q):
+    J =  q/eps_0 * pdot[1:-1] * w
     return J
 
 #%% 2. Electron current continuity equation
