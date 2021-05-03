@@ -325,19 +325,19 @@ class LaserDiode1D(object):
         sol = newton.NewtonSolver(f, fdot, Ef_i, la_fun)
         return sol
 
-    def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1):
+    def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Find potential distribution at zero external bias assuming local
         charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
 
         Parameters
         ----------
-        maxiter : int
+        maxiter : int, optional
             Maximum number of Newton's method iterations.
-        fluct : float
+        fluct : float, optional
             Fluctuation of solution that is needed to stop iterating before
             reaching `maxiter` steps.
-        omega : float
+        omega : float, optional
             Damping parameter.
 
         """
@@ -387,19 +387,19 @@ class LaserDiode1D(object):
                                   inds=np.arange(1, len(psi_init)-1))
         return sol
 
-    def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1):
+    def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Calculate electrostatic potential distribution at equilibrium (zero
         external bias). Uses Newton's method implemented in `NewtonSolver`.
 
         Parameters
         ----------
-        maxiter : int
+        maxiter : int, optional
             Maximum number of Newton's method iterations.
-        fluct : float
+        fluct : float, optional
             Fluctuation of solution that is needed to stop iterating before
             reacing `maxiter` steps.
-        omega : float
+        omega : float, optional
             Damping parameter.
 
         """
@@ -411,8 +411,25 @@ class LaserDiode1D(object):
         self.yin['psi_bi'] = sol.x.copy()
         self._update_solution(sol.x)
 
-    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=[0, 0]):
-        ""
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        """
+        Calculate vertical mode profile. Finds `n_modes` solutions of the
+        eigenvalue problem with the highest eigenvalues (effective
+        indices) and picks the one with the highest optical confinement
+        factor (active region overlap).
+
+        Parameters
+        ----------
+        step : float, optional
+            Uniform mesh step (cm).
+        n_modes : int, optional
+            Number of calculated eigenproblem solutions.
+        remove_layers : (int, int), optional
+            Number of layers to exclude from calculated refractive index
+            profile at each side of the device. Useful to exclude contact
+            layers.
+
+        """
         # generating refractive index profile
         x = np.arange(0, self.slc.get_thickness(), step)
         n = np.array([self.slc.get_value('n_refr', xi) for xi in x])
@@ -505,7 +522,7 @@ class LaserDiode1D(object):
         self.sol['phi_p'][-1] = voltage/2
 
     def transport_step(self, omega=1.0):
-        ""
+        "Perform a single Newton step for transport problem."
         m = self.npoints-2
         h = self.xin[1:]-self.xin[:-1]  # npoints-1
         w = self.xbn[1:]-self.xbn[:-1]  # npoints-2 (m)
@@ -516,26 +533,26 @@ class LaserDiode1D(object):
         # carrier densities
         # indices 1 and 2 correspond to backward and forward values
         # for SG discretization
-        n = self.sol['n']
+        n = self.sol['n']  # m+2
         n1 = cc.n(psi[:-1], phi_n[:-1], self.ybn['Nc'], self.ybn['Ec'],
-                  self.Vt)  # bacward calculation for SG flux
+                  self.Vt)  # m+1
         n2 = cc.n(psi[1:], phi_n[1:], self.ybn['Nc'], self.ybn['Ec'],
-                  self.Vt)  # forward calculation for SG flux
+                  self.Vt)  # m+1
         p = self.sol['p']
         p1 = cc.p(psi[:-1], phi_p[:-1], self.ybn['Nv'], self.ybn['Ev'],
                   self.Vt)
         p2 = cc.p(psi[1:], phi_p[1:], self.ybn['Nv'], self.ybn['Ev'],
                   self.Vt)
 
-        # current densities
-        B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)   # npoints-1
+        # current densities (m+1)
+        B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)
         B_minus = flux.bernoulli(-(psi[1:]-psi[:-1])/self.Vt)
         jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
                         self.Vt, self.q, self.ybn['mu_n'])
         jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
                         self.Vt, self.q, self.ybn['mu_p'])
 
-        # recombination rates
+        # recombination rates (m+2)
         R_srh = rec.srh_R(n[1:-1], p[1:-1],
                           self.yin['n0'][1:-1], self.yin['p0'][1:-1],
                           self.yin['tau_n'][1:-1], self.yin['tau_p'][1:-1])
@@ -547,7 +564,7 @@ class LaserDiode1D(object):
                             self.yin['Cn'][1:-1], self.yin['Cp'][1:-1])
         R = R_srh + R_rad + R_aug
 
-        # calculating residuals
+        # calculating residuals (m*3)
         rvec = np.zeros(m*3)
         rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
                                    self.eps_0, self.q, self.yin['C_dop'])
@@ -555,6 +572,7 @@ class LaserDiode1D(object):
         rvec[2*m:]  =  self.q*(-R)*w - (jp[1:]-jp[:-1])
 
         # carrier densities' derivatives
+        # at mesh nodes (m+2)
         dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
                              self.yin['Ec'], self.Vt)
         dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
@@ -563,8 +581,51 @@ class LaserDiode1D(object):
                              self.yin['Ev'], self.Vt)
         dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
                                self.yin['Ev'], self.Vt)
+        # forward (2-2) and backward (1-1) w.r.t. volume boundaries (m+1)
+        dn1_dpsi1 = cc.dn_dpsi(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                               self.ybn['Ec'], self.Vt)
+        dn2_dpsi2 = cc.dn_dpsi(psi[1:], phi_n[1:], self.ybn['Nc'],
+                               self.ybn['Ec'], self.Vt)
+        dn1_dphin1 = cc.dn_dphin(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                                 self.ybn['Ec'], self.Vt)
+        dn2_dphin2 = cc.dn_dphin(psi[1:], phi_n[1:], self.ybn['Nc'],
+                                 self.ybn['Ec'], self.Vt)
+        dp1_dpsi1 = cc.dp_dpsi(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                               self.ybn['Ev'], self.Vt)
+        dp2_dpsi2 = cc.dp_dpsi(psi[1:], phi_p[1:], self.ybn['Nv'],
+                               self.ybn['Ev'], self.Vt)
+        dp1_dphip1 = cc.dp_dphip(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                                 self.ybn['Ev'], self.Vt)
+        dp2_dphip2 = cc.dp_dphip(psi[1:], phi_p[1:], self.ybn['Nv'],
+                                 self.ybn['Ev'], self.Vt)
 
-        # recombination rate derivatives
+        # Beroulli function derivatives (m+1)
+        Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)
+        Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
+
+        # current densities' derivatives (m+1)
+        djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+        djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+        djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+        djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+
+        # recombination rate derivatives (m+2)
         dR_dpsi = (rec.srh_Rdot(n[1:-1], dn_dpsi[1:-1],
                                 p[1:-1], dp_dpsi[1:-1],
                                 self.yin['n0'][1:-1],
@@ -610,29 +671,18 @@ class LaserDiode1D(object):
                                    self.yin['Cn'][1:-1],
                                    self.yin['Cp'][1:-1]))
 
-"""         # calculating Jacobian
+        # calculating Jacobian (m*3, m*3)
+        # 1. Poisson's equation (F1)
         j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w, self.yin['eps'],
                                   self.eps_0, self.q)
         j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
         j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
-        Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)  # m+1
-        Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
-        djn_dpsi1 = flux.SG_djn_dpsi1(n, dn_dpsi, B_plus, B_minus,
-                                      Bdot_plus, Bdot_minus, h, self.Vt,
-                                      self.q, self.ybn['mu_n'])
-        djn_dpsi2 = flux.SG_djn_dpsi2(n, dn_dpsi, B_plus, B_minus,
-                                      Bdot_plus, Bdot_minus, h, self.Vt,
-                                      self.q, self.ybn['mu_n'])
-        djn_dphin1 = flux.SG_djn_dphin1(dn_dphin[:-1], B_minus, h, self.Vt,
-                                        self.q, self.ybn['mu_n'])
-        djn_dphin2 = flux.SG_djn_dphin2(dn_dphin[1:], B_plus, h, self.Vt,
-                                        self.q, self.ybn['mu_n'])
-
         j11 = sparse.spdiags(j11, [1, 0, -1], m, m)
         j12 = sparse.spdiags(j12, [0,], m, m)
         j13 = sparse.spdiags(j13, [0,], m, m)
         J1 = sparse.hstack([j11, j12, j13])
 
+        # 2. Electron current continuity equation
         j21 = np.zeros((3, m))
         j21[0, 1:] = -djn_dpsi2[1:-1]
         j21[1, :] = self.q*dR_dpsi*w - (djn_dpsi1[1:]-djn_dpsi2[:-1])
@@ -651,17 +701,7 @@ class LaserDiode1D(object):
         j23 = sparse.spdiags(j23, [0,], m, m)
         J2 = sparse.hstack([j21, j22, j23])
 
-        djp_dpsi1 = flux.SG_djp_dpsi1(p, dp_dpsi, B_plus, B_minus,
-                                      Bdot_plus, Bdot_minus, h, self.Vt,
-                                      self.q, self.ybn['mu_p'])
-        djp_dpsi2 = flux.SG_djp_dpsi2(p, dp_dpsi, B_plus, B_minus,
-                                      Bdot_plus, Bdot_minus, h, self.Vt,
-                                      self.q, self.ybn['mu_p'])
-        djp_dphip1 = flux.SG_djp_dphip1(dp_dphip[:-1], B_plus, h, self.Vt,
-                                        self.q, self.ybn['mu_p'])
-        djp_dphip2 = flux.SG_djp_dphip2(dp_dphip[1:], B_minus, h, self.Vt,
-                                        self.q, self.ybn['mu_p'])
-
+        # 3. Hole current continuity equation
         j31 = np.zeros((3, m))
         j31[0, 1:] = -djp_dpsi2[1:-1]
         j31[1, :] = -self.q*dR_dpsi*w - (djp_dpsi1[1:]-djp_dpsi2[:-1])
@@ -680,10 +720,18 @@ class LaserDiode1D(object):
         j33 = sparse.spdiags(j33, [1, 0, -1], m, m)
         J3 = sparse.hstack([j31, j32, j33])
 
+        # calculating update vector dx
         J = sparse.vstack([J1, J2, J3])
         J = J.tocsc()
         dx = sparse.linalg.spsolve(J, -rvec)
-        self._update_solution(dx*omega) """
+    
+        # calculating and saving current fluctuation
+        x = np.hstack((psi[1:-1], phi_n[1:-1], phi_p[1:-1]))
+        fluct = newton.l2_norm(dx) / newton.l2_norm(x)
+        self.fluct.append(fluct)
+
+        # updating current solution (potentials and densities)
+        self._update_solution(dx*omega)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -751,10 +799,14 @@ if __name__=='__main__':
     plt.ylabel('Refractive index', color='g')
 
     # 4. forward bias
+    nsteps = 500
     ld.make_dimensionless()
+    print('Solving drift-diffution system at small forward bias...',
+          end=' ')
     ld.transport_init(0.1)
-    for _ in range(20):
-        ld.transport_step(1e-3)
+    for _ in range(nsteps):
+        ld.transport_step(0.1)
+    print('Complete.')
     ld.original_units()
     plt.figure('Small forward bias')
     plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='b')
@@ -763,3 +815,9 @@ if __name__=='__main__':
     plt.plot(x, -ld.sol['phi_p'], color='r', ls=':')
     plt.xlabel(r'$x$ ($\mu$m)')
     plt.ylabel('Energy (eV)')
+
+    plt.figure('Convergence')
+    plt.plot(ld.fluct)
+    plt.xlabel('Iteration number')
+    plt.ylabel('Fluctuation')
+    plt.yscale('log')

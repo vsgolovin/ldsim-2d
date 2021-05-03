@@ -36,12 +36,12 @@ def SG_jn(n1, n2, B_plus, B_minus, h, Vt, q, mu_n):
     j = -q*mu_n*Vt/h * (n1*B_minus-n2*B_plus)
     return j
 
-def SG_djn_dpsi1(n1, n2, ndot_1, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+def SG_djn_dpsi1(n1, n2, ndot_1, B_minus, Bdot_plus, Bdot_minus, h,
                  Vt, q, mu_n):
     jdot = -q*mu_n/h * (Bdot_minus*n1 + B_minus*ndot_1*Vt + Bdot_plus*n2)
     return jdot
 
-def SG_djn_dpsi2(n1, n2, ndot_2, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+def SG_djn_dpsi2(n1, n2, ndot_2, B_plus, Bdot_plus, Bdot_minus, h,
                  Vt, q, mu_n):
     jdot = q*mu_n/h * (Bdot_minus*n1 + Bdot_plus*n2 + B_plus*ndot_2*Vt)
     return jdot
@@ -59,12 +59,12 @@ def SG_jp(p1, p2, B_plus, B_minus, h, Vt, q, mu_p):
     j =  q*mu_p*Vt/h * (p1*B_plus - p2*B_minus)
     return j
 
-def SG_djp_dpsi1(p1, p2, pdot_1, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+def SG_djp_dpsi1(p1, p2, pdot_1, B_plus, Bdot_plus, Bdot_minus, h,
                  Vt, q, mu_p):
     jdot = q*mu_p/h * (-Bdot_plus*p1+B_plus*pdot_1*Vt-Bdot_minus*p2)
     return jdot
 
-def SG_djp_dpsi2(p1, p2, pdot_2, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+def SG_djp_dpsi2(p1, p2, pdot_2, B_minus, Bdot_plus, Bdot_minus, h,
                  Vt, q, mu_p):
     jdot = q*mu_p/h * (Bdot_plus*p1+Bdot_minus*p2-B_minus*pdot_2*Vt)
     return jdot
