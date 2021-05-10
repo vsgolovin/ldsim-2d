@@ -234,6 +234,10 @@ class LaserDiode1D(object):
             self.calculate_param(p, 'b')
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
+        inds = np.array([self.slc.get_index(xi) for xi in self.xin])
+        self.ar_ix = np.zeros(self.xin.shape, dtype=bool)
+        for ind in self.ar_inds:
+            self.ar_ix |= (inds == ind)
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
