@@ -648,7 +648,7 @@ class LaserDiode1D(object):
         J3 = sparse.hstack([j31, j32, j33])
         return J3
 
-    def transport_step(self, omega=1.0, discr='mSG'):
+    def _transport_system(self, omega=1.0, discr='mSG'):
         """
         Perform a single Newton step for the transport problem.
 
@@ -855,10 +855,28 @@ class LaserDiode1D(object):
         # calculating update vector dx
         J = sparse.vstack([J1, J2, J3])
         J = J.tocsc()
+
+        return J, rvec
+
+    def transport_step(self, omega=1.0, discr='mSG'):
+        """
+        Perform a single Newton step for the transport problem.
+
+        Parameters
+        ----------
+        omega : float
+            Damping parameter (`x += dx*omega`).
+        discr : str
+            Current density discretiztion scheme.
+
+        """
+        J, rvec = self._transport_system(omega, discr)
         dx = sparse.linalg.spsolve(J, -rvec)
 
         # calculating and saving fluctuation
-        x = np.hstack((psi[1:-1], phi_n[1:-1], phi_p[1:-1]))
+        x = np.hstack((self.sol['psi'][1:-1],
+                       self.sol['phi_n'][1:-1],
+                       self.sol['phi_p'][1:-1]))
         fluct = newton.l2_norm(dx) / newton.l2_norm(x)
         self.fluct.append(fluct)
 
