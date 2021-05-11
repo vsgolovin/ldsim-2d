@@ -753,10 +753,10 @@ class LaserDiode1D(object):
 
             # n = Nc * F(nu_n), p = Nv * F(nu_p)
             F = sdf.fermi_fdint
-            nu_n1 = (psi[:-1]-phi_n[:-1]-ld.ybn['Ec']) / self.Vt  # (m+1)
-            nu_n2 = (psi[1:]-phi_n[1:]-ld.ybn['Ec']) / self.Vt
-            nu_p1 = (-psi[:-1]+phi_p[:-1]+ld.ybn['Ev']) / self.Vt
-            nu_p2 = (-psi[1:]+phi_p[1:]+ld.ybn['Ev']) / self.Vt
+            nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
+            nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
+            nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
+            nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
             exp_nu_n1 = np.exp(nu_n1)
             exp_nu_n2 = np.exp(nu_n2)
             exp_nu_p1 = np.exp(nu_p1)
@@ -886,6 +886,7 @@ class LaserDiode1D(object):
 
         # updating current solution (potentials and densities)
         self._update_solution(dx*omega)
+        return fluct
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
