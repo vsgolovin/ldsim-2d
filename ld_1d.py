@@ -32,7 +32,7 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_bi':units.V,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
                'n':units.n, 'p':units.n,
-               'g0':1/units.x, 'N_tr':units.n}
+               'g0':1/units.x, 'N_tr':units.n, 'S':units.n}
 
 class LaserDiode1D(object):
 
@@ -98,6 +98,8 @@ class LaserDiode1D(object):
         self.vg = const.c/ng
         self.n_eff = None
         self.gamma = None
+        self.alpha_i = alpha_i
+        self.beta_sp = beta_sp
 
         # parameters at mesh nodes
         self.yin = dict()  # values at interior nodes
@@ -255,6 +257,8 @@ class LaserDiode1D(object):
         self.L /= units.x
         self.w /= units.x
         self.vg /= units.x/units.t
+        self.alpha_m /= 1/units.x
+        self.alpha_i /= 1/units.x
         # no need to convert other parameters (?)
 
         # mesh
@@ -287,6 +291,8 @@ class LaserDiode1D(object):
         self.L *= units.x
         self.w *= units.x
         self.vg *= units.x/units.t
+        self.alpha_m *= 1/units.x
+        self.alpha_i *= 1/units.x
         # no need to convert other parameters (?)
 
         # mesh
@@ -528,17 +534,16 @@ class LaserDiode1D(object):
 
     def _rec_rate(self):
         "Calculate free carrier recombination rate."
-        R_srh = rec.srh_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                          self.yin['tau_n'][1:-1], self.yin['tau_p'][1:-1])
-        R_rad = rec.rad_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                          self.yin['B'][1:-1])
-        R_aug = rec.auger_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                            self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                            self.yin['Cn'][1:-1], self.yin['Cp'][1:-1])
-        R = R_srh + R_rad + R_aug
-        return R
+        R_srh = rec.srh_R(self.sol['n'], self.sol['p'],
+                          self.yin['n0'], self.yin['p0'],
+                          self.yin['tau_n'], self.yin['tau_p'])
+        R_rad = rec.rad_R(self.sol['n'], self.sol['p'],
+                          self.yin['n0'], self.yin['p0'],
+                          self.yin['B'])
+        R_aug = rec.auger_R(self.sol['n'], self.sol['p'],
+                            self.yin['n0'], self.yin['p0'],
+                            self.yin['Cn'], self.yin['Cp'])
+        return R_srh, R_rad, R_aug
 
     def _rec_rate_derivatives(self, dn_dpsi, dn_dphin, dp_dpsi, dp_dphip):
         "Calculate recombination rate derivatives."
@@ -822,7 +827,8 @@ class LaserDiode1D(object):
                             + 'discretization scheme %s.' % discr)
 
         # recombination rate and its derivatives (m+2)
-        R = self._rec_rate()
+        R_srh, R_rad, R_aug = self._rec_rate()
+        R = (R_srh + R_rad + R_aug)[1:-1]
         dR_dpsi, dR_dphin, dR_dphip = self._rec_rate_derivatives(dn_dpsi,
                                                                  dn_dphin,
                                                                  dp_dpsi,
@@ -887,6 +893,263 @@ class LaserDiode1D(object):
         # updating current solution (potentials and densities)
         self._update_solution(dx*omega)
         return fluct
+
+    def _calculate_fca(self):
+        "Calculate free-carrier absorption."
+        E2 = self.yin['wg_mode'][1:-1]
+        w = self.xbn[1:] - self.xbn[:-1]
+        n = self.sol['n'][1:-1]
+        p = self.sol['p'][1:-1]
+        arr = E2*w*(n*self.fca_e + p*self.fca_h)
+        return np.sum(arr)
+
+    def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
+                    phi_p_init=None):
+        self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
+        self.sol['S'] = 0.0
+
+    def lasing_step(self, omega=0.1, discr='mSG'):
+        ""
+
+        # mesh parameters
+        m = self.npoints - 2  # number of inner nodes
+                              # used in comments to show array shape
+        h = self.xin[1:] - self.xin[:-1]  # mesh steps (m+1)
+        w = self.xbn[1:] - self.xbn[:-1]  # volumes (m)
+
+        # potentials, carrier densities and their derivatives at nodes
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        phi_p = self.sol['phi_p']
+        n = self.sol['n']
+        p = self.sol['p']
+        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
+                             self.yin['Ec'], self.Vt)
+        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
+                               self.yin['Ec'], self.Vt)
+        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'],
+                             self.yin['Ev'], self.Vt)
+        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
+                               self.yin['Ev'], self.Vt)
+
+        # Bernoulli function for current density calculation (m+1)
+        B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)
+        B_minus = flux.bernoulli(-(psi[1:]-psi[:-1])/self.Vt)
+        Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)
+        Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
+
+        # calculating current densities and their derivatives
+        if discr == 'SG':  # Scharfetter-Gummel discretization
+
+            # carrier densities at finite volume boundaries (m+1)
+            n1 = cc.n(psi[:-1], phi_n[:-1], self.ybn['Nc'], self.ybn['Ec'],
+                      self.Vt)
+            n2 = cc.n(psi[1:], phi_n[1:], self.ybn['Nc'], self.ybn['Ec'],
+                      self.Vt)
+            p1 = cc.p(psi[:-1], phi_p[:-1], self.ybn['Nv'], self.ybn['Ev'],
+                      self.Vt)
+            p2 = cc.p(psi[1:], phi_p[1:], self.ybn['Nv'], self.ybn['Ev'],
+                      self.Vt)
+            # forward (2-2) and backward (1-1) derivatives
+            # w.r.t. volume boundaries (m+1)
+            dn1_dpsi1 = cc.dn_dpsi(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                                   self.ybn['Ec'], self.Vt)
+            dn2_dpsi2 = cc.dn_dpsi(psi[1:], phi_n[1:], self.ybn['Nc'],
+                                   self.ybn['Ec'], self.Vt)
+            dn1_dphin1 = cc.dn_dphin(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                                     self.ybn['Ec'], self.Vt)
+            dn2_dphin2 = cc.dn_dphin(psi[1:], phi_n[1:], self.ybn['Nc'],
+                                     self.ybn['Ec'], self.Vt)
+            dp1_dpsi1 = cc.dp_dpsi(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                                   self.ybn['Ev'], self.Vt)
+            dp2_dpsi2 = cc.dp_dpsi(psi[1:], phi_p[1:], self.ybn['Nv'],
+                                   self.ybn['Ev'], self.Vt)
+            dp1_dphip1 = cc.dp_dphip(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                                     self.ybn['Ev'], self.Vt)
+            dp2_dphip2 = cc.dp_dphip(psi[1:], phi_p[1:], self.ybn['Nv'],
+                                     self.ybn['Ev'], self.Vt)
+
+            # current densities and their derivatives (m+1)
+            jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
+                            self.Vt, self.q, self.ybn['mu_n'])
+            jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
+                            self.Vt, self.q, self.ybn['mu_p'])
+            djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
+                                          Bdot_plus, Bdot_minus, h, self.Vt,
+                                          self.q, self.ybn['mu_n'])
+            djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus,
+                                          Bdot_plus, Bdot_minus, h, self.Vt,
+                                          self.q, self.ybn['mu_n'])
+            djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, self.Vt,
+                                            self.q, self.ybn['mu_n'])
+            djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, self.Vt,
+                                            self.q, self.ybn['mu_n'])
+            djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
+                                          Bdot_plus, Bdot_minus, h, self.Vt,
+                                          self.q, self.ybn['mu_p'])
+            djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus,
+                                          Bdot_plus, Bdot_minus, h, self.Vt,
+                                          self.q, self.ybn['mu_p'])
+            djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, self.Vt,
+                                            self.q, self.ybn['mu_p'])
+            djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, self.Vt,
+                                            self.q, self.ybn['mu_p'])
+
+        elif discr == 'mSG':  # modified SG discretization
+
+            # n = Nc * F(nu_n), p = Nv * F(nu_p)
+            F = sdf.fermi_fdint
+            nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
+            nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
+            nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
+            nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
+            exp_nu_n1 = np.exp(nu_n1)
+            exp_nu_n2 = np.exp(nu_n2)
+            exp_nu_p1 = np.exp(nu_p1)
+            exp_nu_p2 = np.exp(nu_p2)
+
+            # current densities (m+1)
+            gn = flux.g(nu_n1, nu_n2, F)
+            gp = flux.g(nu_p1, nu_p2, F)
+            jn_SG = flux.oSG_jn(exp_nu_n1, exp_nu_n2, B_plus, B_minus,
+                                h, self.ybn['Nc'], self.Vt, self.q,
+                                self.ybn['mu_n'])
+            jp_SG = flux.oSG_jp(exp_nu_p1, exp_nu_p2, B_plus, B_minus,
+                                h, self.ybn['Nv'], self.Vt, self.q,
+                                self.ybn['mu_p'])
+            jn = jn_SG * gn
+            jp = jp_SG * gp
+
+            # current densities' derivatives
+            Fdot = sdf.fermi_dot_fdint
+            gdot_n1 = flux.gdot(gn, nu_n1, F, Fdot) / self.Vt
+            gdot_n2 = flux.gdot(gn, nu_n2, F, Fdot) / self.Vt
+            gdot_p1 = flux.gdot(gp, nu_p1, F, Fdot) / self.Vt
+            gdot_p2 = flux.gdot(gp, nu_p2, F, Fdot) / self.Vt
+            djn_dpsi1_SG = flux.oSG_djn_dpsi1(exp_nu_n1, exp_nu_n2,
+                                            B_minus, Bdot_plus, Bdot_minus,
+                                            h, self.ybn['Nc'], self.q,
+                                            self.ybn['mu_n'])
+            djn_dpsi1 = flux.mSG_jdot(jn_SG, djn_dpsi1_SG, gn, gdot_n1)
+            djn_dpsi2_SG = flux.oSG_djn_dpsi2(exp_nu_n1, exp_nu_n2,
+                                            B_plus, Bdot_plus, Bdot_minus,
+                                            h, self.ybn['Nc'], self.q,
+                                            self.ybn['mu_n'])
+            djn_dpsi2 = flux.mSG_jdot(jn_SG, djn_dpsi2_SG, gn, gdot_n2)
+            djn_dphin1_SG = flux.oSG_djn_dphin1(exp_nu_n1, B_minus, h,
+                                                self.ybn['Nc'], self.q,
+                                                self.ybn['mu_n'])
+            djn_dphin1 = flux.mSG_jdot(jn_SG, djn_dphin1_SG, gn, -gdot_n1)
+            djn_dphin2_SG = flux.oSG_djn_dphin2(exp_nu_n2, B_plus, h,
+                                                self.ybn['Nc'], self.q,
+                                                self.ybn['mu_n'])
+            djn_dphin2 = flux.mSG_jdot(jn_SG, djn_dphin2_SG, gn, -gdot_n2)
+            djp_dpsi1_SG = flux.oSG_djp_dpsi1(exp_nu_p1, exp_nu_p2,
+                                            B_plus, Bdot_plus, Bdot_minus,
+                                            h, self.ybn['Nv'], self.q,
+                                            self.ybn['mu_p'])
+            djp_dpsi1 = flux.mSG_jdot(jp_SG, djp_dpsi1_SG, gp, -gdot_p1)
+            djp_dpsi2_SG = flux.oSG_djp_dpsi2(exp_nu_p1, exp_nu_p2,
+                                            B_minus, Bdot_plus, Bdot_minus,
+                                            h, self.ybn['Nv'], self.q,
+                                            self.ybn['mu_p'])
+            djp_dpsi2 = flux.mSG_jdot(jp_SG, djp_dpsi2_SG, gp, -gdot_p2)
+            djp_dphip1_SG = flux.oSG_djp_dphip1(exp_nu_p1, B_plus, h,
+                                                self.ybn['Nv'], self.q,
+                                                self.ybn['mu_p'])
+            djp_dphip1 = flux.mSG_jdot(jp_SG, djp_dphip1_SG, gp, gdot_p1)
+            djp_dphip2_SG = flux.oSG_djp_dphip2(exp_nu_p2, B_minus, h,
+                                                self.ybn['Nv'], self.q,
+                                                self.ybn['mu_p'])
+            djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
+
+        else:
+            raise Exception('Error: unknown current density '
+                            + 'discretization scheme %s.' % discr)
+
+        # recombination rate and its derivatives (m+2)
+        R_srh, R_rad, R_aug = self._rec_rate()
+        R = (R_srh + R_rad + R_aug)[1:-1]
+        dR_dpsi, dR_dphin, dR_dphip = self._rec_rate_derivatives(dn_dpsi,
+                                                                 dn_dphin,
+                                                                 dp_dpsi,
+                                                                 dp_dphip)
+
+        # calculating residual of the system (m*3)
+        rvec = np.zeros(m*3)
+        rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
+                                   self.eps_0, self.q, self.yin['C_dop'])
+        rvec[m:2*m] = -self.q*(-R)*w - (jn[1:]-jn[:-1])
+        rvec[2*m:]  =  self.q*(-R)*w - (jp[1:]-jp[:-1])
+
+        # calculating Jacobian (m*3, m*3)
+        # 1. Poisson's equation
+        j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w, self.yin['eps'],
+                                  self.eps_0, self.q)
+        j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
+        j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
+        j11 = sparse.spdiags(j11, [1, 0, -1], m, m)
+        j12 = sparse.spdiags(j12, [0,], m, m)
+        j13 = sparse.spdiags(j13, [0,], m, m)
+        J1 = sparse.hstack([j11, j12, j13])
+
+        # 2. Electron current continuity equation
+        J2 = self._jn_cont_jac(djn_dpsi1, djn_dpsi2,
+                                          djn_dphin1, djn_dphin2,
+                                          dR_dpsi, dR_dphin, dR_dphip, w)
+
+        # 3. Hole current continuity equation
+        J3 = self._jp_cont_jac(djp_dpsi1, djp_dpsi2,
+                                          djp_dphip1, djp_dphip2,
+                                          dR_dpsi, dR_dphin, dR_dphip, w)
+
+        # calculating update vector dx
+        J = sparse.vstack([J1, J2, J3])
+        J = J.tocsc()
+
+        # stimulated emission
+        S = self.sol['S']  # single float
+        se_n = n[self.ar_ix]
+        se_p = p[self.ar_ix]
+        ar_ix = self.ar_ix
+        se_w = w[ar_ix[1:-1]]
+        T = self.yin['wg_mode']
+
+        # calculating gain
+        ix = (se_n < se_p)
+        N = np.zeros_like(se_n)
+        N[ix] += se_n[ix]
+        N[~ix] += se_p[~ix]
+        g0 = self.yin['g0'][ar_ix]
+        N_tr = self.yin['N_tr'][ar_ix]
+        gain = g0 * np.log(N / N_tr)
+
+        gain_dpsi = np.zeros_like(gain)
+        gain_dpsi[ix] += (g0 * dn_dpsi[ar_ix] / se_n)[ix]
+        gain_dpsi[~ix] += (g0 * dp_dpsi[ar_ix] / se_p)[~ix]
+        gain_dphin = np.zeros_like(gain)
+        gain_dphin[ix] += (g0 * dn_dphin[ar_ix] / se_n)[ix]
+        gain_dphip = np.zeros_like(gain)
+        gain_dphip[~ix] += (g0 * dp_dphip[ar_ix] / se_p)[~ix]
+
+        # calculating total loss / gain
+        fca = self._calculate_fca()
+        alpha = self.alpha_i + self.alpha_m + fca
+        total_gain = np.sum(gain * w[ar_ix[1:-1]] * T[ar_ix]) - alpha
+
+        # wrong: using total recombination rate instead of radiative
+        # not important rn
+        se_R = R[ar_ix[1:-1]]
+        se_r = (self.beta_sp*np.sum(se_R*w[ar_ix[1:-1]])/self.xin[-1]
+                + self.vg*total_gain*S)
+        rvec = np.concatenate([rvec, np.array([se_r])])
+
+        # recombination rate derivatives
+        se_dR_dpsi = dR_dpsi[ar_ix[1:-1]]
+        se_dR_dphin = dR_dphin[ar_ix[1:-1]]
+        se_dR_dphip = dR_dphip[ar_ix[1:-1]]
+
+        return rvec
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -958,9 +1221,10 @@ if __name__ == '__main__':
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
-    ld.transport_init(0.1)
-    for _ in range(nsteps):
-        ld.transport_step(0.1, 'mSG')
+    ld.lasing_init(0.1)
+    rvec = ld.lasing_step()
+    # for _ in range(nsteps):
+        # ld.transport_step(0.1, 'mSG')
     print('Complete.')
     ld.original_units()
     plt.figure('Small forward bias')
