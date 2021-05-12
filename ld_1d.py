@@ -952,8 +952,8 @@ class LaserDiode1D(object):
         N[ix] += n[ix]
         N[~ix] += p[~ix]
         gain = g0 * np.log(N / N_tr)
-        # indabs = np.where(gain < 0)
-        # gain[indabs] = 0
+        indabs = np.where(gain < 0)
+        gain[indabs] = 0.
 
         # gain derivatives
         gain_dpsi = np.zeros_like(gain)
@@ -963,6 +963,8 @@ class LaserDiode1D(object):
         gain_dphin[ix] += (g0 * dn_dphin / n)[ix]
         gain_dphip = np.zeros_like(gain)
         gain_dphip[~ix] += (g0 * dp_dphip / p)[~ix]
+        for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
+            gdot[indabs] = 0
 
         # calculating total loss / gain
         fca = self._calculate_fca()
@@ -1050,6 +1052,10 @@ class LaserDiode1D(object):
         self.sol['psi'][1:-1] += dx[:m]*omega
         self.sol['phi_n'][1:-1] += dx[m:2*m]*omega
         self.sol['phi_p'][1:-1] += dx[2*m:3*m]*omega
+        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
+                             self.yin['Nc'], self.yin['Ec'], self.Vt)
+        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
+                             self.yin['Nv'], self.yin['Ev'], self.Vt)
         self.sol['S'] += dx[-1]*omega
         self.svals.append(self.sol['S'])
 
@@ -1121,11 +1127,12 @@ if __name__ == '__main__':
     plt.ylabel('Refractive index', color='g')
 
     # 4. forward bias
-    nsteps = 2000
+    nsteps = 1000
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
     ld.lasing_init(0.1)
+    ld.sol['S'] = 0
     # rvec, J = ld.lasing_step()
     for _ in range(nsteps):
         ld.lasing_step(0.1, 'mSG')

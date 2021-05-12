@@ -18,14 +18,17 @@ ld.solve_waveguide(remove_layers=[1,1])
 ld.make_dimensionless()
 ld.solve_equilibrium()
 
-voltages = np.arange(0, 1.5, 0.1)
-for v in voltages:
+voltages = np.arange(0, 2.5, 0.1)
+s_values = np.zeros_like(voltages)
+for i, v in enumerate(voltages):
     print(v, end=', ')
     ld.lasing_init(v)
     fluct = 1
-    while fluct>3e-5:
+    while fluct>1e-7:
         fluct = ld.lasing_step(0.1, 'mSG')
     print(ld.iterations)
+    s_values[i] = ld.sol['S']
+
 
 ld.original_units()
 x = ld.xin * 1e4
