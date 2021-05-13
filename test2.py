@@ -21,14 +21,13 @@ ld.solve_equilibrium()
 voltages = np.arange(0, 2.5, 0.1)
 s_values = np.zeros_like(voltages)
 for i, v in enumerate(voltages):
-    print(v, end=', ')
+    print('%.2f'%v, end=', ')
     ld.lasing_init(v)
     fluct = 1
     while fluct>1e-7:
-        fluct = ld.lasing_step(0.1, 'mSG')
-    print(ld.iterations)
+        fluct = ld.lasing_step(0.1, (1.0, 0.1), 'mSG')
     s_values[i] = ld.sol['S']
-
+    print('%d, %.3e' % (ld.iterations, ld.sol['S']))
 
 ld.original_units()
 x = ld.xin * 1e4

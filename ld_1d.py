@@ -105,6 +105,7 @@ class LaserDiode1D(object):
         self.yin = dict()  # values at interior nodes
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
+        self.sol['S'] = 0.0
 
         self.gen_uniform_mesh()
         self.is_dimensionless = False
@@ -906,11 +907,8 @@ class LaserDiode1D(object):
     def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
                     phi_p_init=None):
         self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
-        if voltage==0:
-            self.sol['S'] = 0.0
-        self.svals = list()
 
-    def lasing_step(self, omega=0.1, discr='mSG'):
+    def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
         ""
 
         # residual vector and Jacobian for transport problem
@@ -1056,8 +1054,10 @@ class LaserDiode1D(object):
                              self.yin['Nc'], self.yin['Ec'], self.Vt)
         self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
                              self.yin['Nv'], self.yin['Ev'], self.Vt)
-        self.sol['S'] += dx[-1]*omega
-        self.svals.append(self.sol['S'])
+        if dx[-1] > 0:
+            self.sol['S'] += dx[-1] * omega_S[0] 
+        else:
+            self.sol['S'] += dx[-1] * omega_S[1]
 
         return fluct
 
@@ -1135,7 +1135,7 @@ if __name__ == '__main__':
     ld.sol['S'] = 0
     # rvec, J = ld.lasing_step()
     for _ in range(nsteps):
-        ld.lasing_step(0.1, 'mSG')
+        ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
     print('Complete.')
     ld.original_units()
     plt.figure('Small forward bias')
