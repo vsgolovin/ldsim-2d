@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sample_slice import sl
 from ld_1d import LaserDiode1D
+import units
+import constants as const
 
 plt.rc('lines', linewidth=0.7)
 plt.rc('figure.subplot', left=0.15, right=0.85)
@@ -18,18 +20,24 @@ ld.solve_waveguide(remove_layers=[1,1])
 ld.make_dimensionless()
 ld.solve_equilibrium()
 
-voltages = np.arange(0, 2.5, 0.1)
+voltages = np.arange(0, 2.51, 0.05)
+j_values = np.zeros_like(voltages)
 s_values = np.zeros_like(voltages)
 for i, v in enumerate(voltages):
     print('%.2f'%v, end=', ')
-    ld.lasing_init(v)
+    ld.transport_init(v)
     fluct = 1
     while fluct>1e-7:
         fluct = ld.lasing_step(0.1, (1.0, 0.1), 'mSG')
+    j_values[i] = -ld.sol['J']
     s_values[i] = ld.sol['S']
     print('%d, %.3e' % (ld.iterations, ld.sol['S']))
 
 ld.original_units()
+s_values *= units.n*units.x
+j_values *= units.j
+I_values = j_values * ld.w * ld.L
+P_values = s_values*ld.w*ld.L * ld.vg*ld.alpha_m * const.h*const.c/ld.lam
 x = ld.xin * 1e4
 
 plt.figure('Band diagram')
@@ -37,7 +45,6 @@ plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='k')
 plt.plot(x, ld.yin['Ev']-ld.sol['psi'], color='k')
 plt.plot(x, -ld.sol['phi_n'], 'b:')
 plt.plot(x, -ld.sol['phi_p'], 'r:')
-# plt.savefig('test2.png', dpi=150)
 
 plt.figure('Concentrations')
 plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='k')
@@ -46,3 +53,9 @@ plt.twinx()
 plt.plot(x, ld.sol['n'], 'b-')
 plt.plot(x, ld.sol['p'], 'r-')
 plt.yscale('log')
+
+plt.figure('J-V curve')
+plt.plot(voltages, j_values)
+
+plt.figure('P-I curve')
+plt.plot(I_values, P_values)

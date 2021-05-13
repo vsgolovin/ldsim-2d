@@ -32,7 +32,8 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_bi':units.V,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
                'n':units.n, 'p':units.n,
-               'g0':1/units.x, 'N_tr':units.n, 'S':units.n}
+               'g0':1/units.x, 'N_tr':units.n, 'S':units.n, 'J':units.j}
+
 
 class LaserDiode1D(object):
 
@@ -421,7 +422,19 @@ class LaserDiode1D(object):
             warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation '+
                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
         self.yin['psi_bi'] = sol.x.copy()
-        self._update_solution(sol.x)
+        self.sol['psi'] = sol.x.copy()
+        self.sol['phi_n'] = np.zeros_like(sol.x)
+        self.sol['phi_p'] = np.zeros_like(sol.x)
+        self._update_densities()
+
+    def _update_densities(self):
+        """
+        Update electron and hole densities using currently stored potentials.
+        """
+        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
+                             self.yin['Nc'], self.yin['Ec'], self.Vt)
+        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
+                             self.yin['Nv'], self.yin['Ev'], self.Vt)
 
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
         """
@@ -450,7 +463,7 @@ class LaserDiode1D(object):
         # removing boundary layers (if needed)
         i1, i2 = remove_layers
         to_remove = self.slc.inds[:i1]
-        if i2>0:
+        if i2 > 0:
             to_remove += self.slc.inds[-i2:]
         ix = np.array([True]*len(inds))
         for layer_index in to_remove:
@@ -493,23 +506,6 @@ class LaserDiode1D(object):
         else:
             self.yin['wg_mode'] = self.wgm_fun(self.xin)
 
-    def _update_solution(self, v):
-        "Update `self.sol` using calculated potentials vector `v`."
-        if len(v)==3*(self.npoints-2):  # change in psi, phi_n, phi_p
-            m = self.npoints-2
-            self.sol['psi'][1:-1] += v[:m]
-            self.sol['phi_n'][1:-1] += v[m:2*m]
-            self.sol['phi_p'][1:-1] += v[2*m:]
-        else:
-            assert len(v)==self.npoints
-            self.sol['psi'] = v.copy()
-            self.sol['phi_n'] = np.zeros_like(v)
-            self.sol['phi_p'] = np.zeros_like(v)
-        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
-                             self.yin['Nc'], self.yin['Ec'], self.Vt)
-        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
-                             self.yin['Nv'], self.yin['Ev'], self.Vt)
-
     def transport_init(self, voltage, psi_init=None, phi_n_init=None,
                        phi_p_init=None):
         "Initialize carrier transport problem at some external voltage."
@@ -532,73 +528,6 @@ class LaserDiode1D(object):
         self.sol['phi_n'][-1] = voltage/2
         self.sol['phi_p'][0] = -voltage/2
         self.sol['phi_p'][-1] = voltage/2
-
-    def _rec_rate(self):
-        "Calculate free carrier recombination rate."
-        R_srh = rec.srh_R(self.sol['n'], self.sol['p'],
-                          self.yin['n0'], self.yin['p0'],
-                          self.yin['tau_n'], self.yin['tau_p'])
-        R_rad = rec.rad_R(self.sol['n'], self.sol['p'],
-                          self.yin['n0'], self.yin['p0'],
-                          self.yin['B'])
-        R_aug = rec.auger_R(self.sol['n'], self.sol['p'],
-                            self.yin['n0'], self.yin['p0'],
-                            self.yin['Cn'], self.yin['Cp'])
-        return R_srh, R_rad, R_aug
-
-    def _rec_rate_derivatives(self, dn_dpsi, dn_dphin, dp_dpsi, dp_dphip):
-        "Calculate recombination rate derivatives."
-        dR_dpsi = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                self.yin['n0'][1:-1],
-                                self.yin['p0'][1:-1],
-                                self.yin['tau_n'][1:-1],
-                                self.yin['tau_p'][1:-1])
-                  +rec.rad_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                self.yin['n0'][1:-1],
-                                self.yin['p0'][1:-1],
-                                self.yin['B'][1:-1])
-                  +rec.auger_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                  self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                  self.yin['n0'][1:-1],
-                                  self.yin['p0'][1:-1],
-                                  self.yin['Cn'][1:-1],
-                                  self.yin['Cp'][1:-1]))
-        dR_dphin = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                 self.sol['p'][1:-1], 0,
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['tau_n'][1:-1],
-                                 self.yin['tau_p'][1:-1])
-                   +rec.rad_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                 self.sol['p'][1:-1], 0,
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['B'][1:-1])
-                   +rec.auger_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                   self.sol['p'][1:-1], 0,
-                                   self.yin['n0'][1:-1],
-                                   self.yin['p0'][1:-1],
-                                   self.yin['Cn'][1:-1],
-                                   self.yin['Cp'][1:-1]))
-        dR_dphip = (rec.srh_Rdot(self.sol['n'][1:-1], 0,
-                                 self.sol['p'][1:-1], dp_dphip[1:-1],
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['tau_n'][1:-1],
-                                 self.yin['tau_p'][1:-1])
-                   +rec.rad_Rdot(self.sol['n'][1:-1], 0,
-                                 self.sol['p'][1:-1], dp_dphip[1:-1],
-                                 self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                                 self.yin['B'][1:-1])
-                   +rec.auger_Rdot(self.sol['n'][1:-1], 0,
-                                   self.sol['p'][1:-1], dp_dphip[1:-1],
-                                   self.yin['n0'][1:-1],
-                                   self.yin['p0'][1:-1],
-                                   self.yin['Cn'][1:-1],
-                                   self.yin['Cp'][1:-1]))
-        return dR_dpsi, dR_dphin, dR_dphip
 
     def _jn_cont_jac(self, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2,
                      dR_dpsi, dR_dphin, dR_dphip, w):
@@ -658,9 +587,9 @@ class LaserDiode1D(object):
         J3 = sparse.hstack([j31, j32, j33])
         return J3
 
-    def _transport_system(self, omega=1.0, discr='mSG'):
+    def _transport_system(self, discr='mSG'):
         """
-        Perform a single Newton step for the transport problem.
+        Calculate Jacobian and residual for the transport problem.
 
         Parameters
         ----------
@@ -669,8 +598,15 @@ class LaserDiode1D(object):
         discr : str
             Current density discretiztion scheme.
 
-        """
+        Returns
+        -------
+        J : scipy.sparse.cscmatrix
+            Transport system Jacobian.
+            Shape is `(self.npoints - 2, self.npoints - 2)`.
+        r : numpy.ndarray
+            Residual vector with length `self.npoints - 2`.
 
+        """
         # mesh parameters
         m = self.npoints - 2  # number of inner nodes
                               # used in comments to show array shape
@@ -827,13 +763,72 @@ class LaserDiode1D(object):
             raise Exception('Error: unknown current density '
                             + 'discretization scheme %s.' % discr)
 
-        # recombination rate and its derivatives (m+2)
-        R_srh, R_rad, R_aug = self._rec_rate()
-        R = (R_srh + R_rad + R_aug)[1:-1]
-        dR_dpsi, dR_dphin, dR_dphip = self._rec_rate_derivatives(dn_dpsi,
-                                                                 dn_dphin,
-                                                                 dp_dpsi,
-                                                                 dp_dphip)
+        # store calculated current density
+        self.sol['J'] = (jn + jp).mean()
+
+        # recombination rates (m)
+        R_srh = rec.srh_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
+                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                          self.yin['tau_n'][1:-1], self.yin['tau_p'][1:-1])
+        R_rad = rec.rad_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
+                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                          self.yin['B'][1:-1])
+        R_aug = rec.auger_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
+                            self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                            self.yin['Cn'][1:-1], self.yin['Cp'][1:-1])
+        R = (R_srh + R_rad + R_aug)
+
+        # recombination rates' derivatives
+        dR_dpsi = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
+                                self.sol['p'][1:-1], dp_dpsi[1:-1],
+                                self.yin['n0'][1:-1],
+                                self.yin['p0'][1:-1],
+                                self.yin['tau_n'][1:-1],
+                                self.yin['tau_p'][1:-1])
+                  +rec.rad_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
+                                self.sol['p'][1:-1], dp_dpsi[1:-1],
+                                self.yin['n0'][1:-1],
+                                self.yin['p0'][1:-1],
+                                self.yin['B'][1:-1])
+                  +rec.auger_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
+                                  self.sol['p'][1:-1], dp_dpsi[1:-1],
+                                  self.yin['n0'][1:-1],
+                                  self.yin['p0'][1:-1],
+                                  self.yin['Cn'][1:-1],
+                                  self.yin['Cp'][1:-1]))
+        dR_dphin = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
+                                 self.sol['p'][1:-1], 0,
+                                 self.yin['n0'][1:-1],
+                                 self.yin['p0'][1:-1],
+                                 self.yin['tau_n'][1:-1],
+                                 self.yin['tau_p'][1:-1])
+                   +rec.rad_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
+                                 self.sol['p'][1:-1], 0,
+                                 self.yin['n0'][1:-1],
+                                 self.yin['p0'][1:-1],
+                                 self.yin['B'][1:-1])
+                   +rec.auger_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
+                                   self.sol['p'][1:-1], 0,
+                                   self.yin['n0'][1:-1],
+                                   self.yin['p0'][1:-1],
+                                   self.yin['Cn'][1:-1],
+                                   self.yin['Cp'][1:-1]))
+        dR_dphip = (rec.srh_Rdot(self.sol['n'][1:-1], 0,
+                                 self.sol['p'][1:-1], dp_dphip[1:-1],
+                                 self.yin['n0'][1:-1],
+                                 self.yin['p0'][1:-1],
+                                 self.yin['tau_n'][1:-1],
+                                 self.yin['tau_p'][1:-1])
+                   +rec.rad_Rdot(self.sol['n'][1:-1], 0,
+                                 self.sol['p'][1:-1], dp_dphip[1:-1],
+                                 self.yin['n0'][1:-1], self.yin['p0'][1:-1],
+                                 self.yin['B'][1:-1])
+                   +rec.auger_Rdot(self.sol['n'][1:-1], 0,
+                                   self.sol['p'][1:-1], dp_dphip[1:-1],
+                                   self.yin['n0'][1:-1],
+                                   self.yin['p0'][1:-1],
+                                   self.yin['Cn'][1:-1],
+                                   self.yin['Cp'][1:-1]))
 
         # calculating residual of the system (m*3)
         rvec = np.zeros(m*3)
@@ -881,7 +876,7 @@ class LaserDiode1D(object):
             Current density discretiztion scheme.
 
         """
-        J, rvec = self._transport_system(omega, discr)
+        J, rvec = self._transport_system(discr)
         dx = sparse.linalg.spsolve(J, -rvec)
 
         # calculating and saving fluctuation
@@ -892,7 +887,11 @@ class LaserDiode1D(object):
         self.fluct.append(fluct)
 
         # updating current solution (potentials and densities)
-        self._update_solution(dx*omega)
+        m = self.npoints - 2
+        self.sol['psi'][1:-1] += dx[:m] * omega
+        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+        self._update_densities()
         return fluct
 
     def _calculate_fca(self):
@@ -904,18 +903,28 @@ class LaserDiode1D(object):
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
 
-    def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
-                    phi_p_init=None):
-        self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
-
     def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
-        ""
+        """
+        Perform a single Newton step for the lasing problem.
 
+        Parameters
+        ----------
+        omega : float
+            Damping parameter for potentials.
+        omega_S : (float, float)
+            Dampling parameter for photon density `S`. First value is used
+            for increasing `S`, second -- for decreasing `S`.
+        discr : str
+            Current density discretiztion scheme.
+
+       
+        """
         # residual vector and Jacobian for transport problem
-        J, rvec = self._transport_system(omega, discr)
+        J, rvec = self._transport_system(discr)
 
-        S = self.sol['S']
-        n = self.sol['n'][self.ar_ix]
+        # shorthands for heavily used variables
+        S = self.sol['S']  # photon density
+        n = self.sol['n'][self.ar_ix]  # inside active region
         p = self.sol['p'][self.ar_ix]
         w = (self.xbn[1:] - self.xbn[:-1])[self.ar_ix[1:-1]]
         T = self.yin['wg_mode'][self.ar_ix]
@@ -944,12 +953,14 @@ class LaserDiode1D(object):
                                self.yin['Ev'][self.ar_ix],
                                self.Vt)
 
-        # calculating gain
+        # material gain
         ix = (n < p)
         N = np.zeros_like(n)
         N[ix] += n[ix]
         N[~ix] += p[~ix]
         gain = g0 * np.log(N / N_tr)
+
+        # ignore absorption
         indabs = np.where(gain < 0)
         gain[indabs] = 0.
 
@@ -962,7 +973,7 @@ class LaserDiode1D(object):
         gain_dphip = np.zeros_like(gain)
         gain_dphip[~ix] += (g0 * dp_dphip / p)[~ix]
         for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
-            gdot[indabs] = 0
+            gdot[indabs] = 0  # absorption
 
         # calculating total loss / gain
         fca = self._calculate_fca()
@@ -1004,40 +1015,43 @@ class LaserDiode1D(object):
                        +self.vg*gain_dphip*w*T*S)
         J4[-1] = self.vg*total_gain
 
+        # stimulated emission rate and its derivatives in active region
         Rst = self.vg * gain * w * T * S
         dRst_dS = self.vg * gain * w * T
         dRst_dpsi = self.vg * gain_dpsi * w * T * S
         dRst_dphin = self.vg * gain_dphin * w * T * S
         dRst_dphip = self.vg * gain_dphip * w * T * S
 
+        # correcting residual vector with
         rvec[inds+m] += Rst
         rvec[inds+2*m] += -Rst
 
+        # correction for electron current continuity eq. Jacobian
         j21 = np.zeros(m)
-        j21[inds] = dRst_dpsi
+        j21[inds] = self.q * dRst_dpsi
         j21 = np.diag(j21)
-
         j22 = np.zeros(m)
-        j22[inds] = dRst_dphin
+        j22[inds] = self.q * dRst_dphin
         j22 = np.diag(j22)
-    
-        j23 = np.zeros(m)
-        j23[inds] = dRst_dphip
+        j23 = np.zeros(m)  # opposite for hole current
+        j23[inds] = self.q * dRst_dphip
         j23 = np.diag(j23)
-
         dJ1 = np.zeros((m, 3*m))
         dJ2 = np.hstack([j21, j22, j23])
         dJ3 = -dJ2
         dJ = np.vstack([dJ1, dJ2, dJ3])
         J += dJ
 
+        # adding column with derivatives w.r.t. photon density
         Jc = np.zeros((3*m, 1))
-        Jc[inds+m, 0] = dRst_dS
-        Jc[inds+2*m, 0] = -dRst_dS
+        Jc[inds+m, 0] = self.q * dRst_dS
+        Jc[inds+2*m, 0] = -self.q * dRst_dS
 
+        # adding J4 to Jacobian
         Jtop = np.hstack([J, Jc])
         J = sparse.csc_matrix(np.vstack([Jtop, J4]))
 
+        # solve the system
         dx = sparse.linalg.spsolve(J, -rvec)
         x = np.hstack((self.sol['psi'][1:-1],
                        self.sol['phi_n'][1:-1],
@@ -1045,8 +1059,9 @@ class LaserDiode1D(object):
                        np.array([self.sol['S']])))
         fluct = newton.l2_norm(dx) / newton.l2_norm(x)
         self.fluct.append(fluct)
-
         self.iterations += 1
+ 
+        # update solution
         self.sol['psi'][1:-1] += dx[:m]*omega
         self.sol['phi_n'][1:-1] += dx[m:2*m]*omega
         self.sol['phi_p'][1:-1] += dx[2*m:3*m]*omega
@@ -1127,11 +1142,11 @@ if __name__ == '__main__':
     plt.ylabel('Refractive index', color='g')
 
     # 4. forward bias
-    nsteps = 1000
+    nsteps = 500
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
-    ld.lasing_init(0.1)
+    ld.transport_init(0.1)
     ld.sol['S'] = 0
     # rvec, J = ld.lasing_step()
     for _ in range(nsteps):
@@ -1151,5 +1166,3 @@ if __name__ == '__main__':
     plt.xlabel('Iteration number')
     plt.ylabel('Fluctuation')
     plt.yscale('log')
-    plt.twinx()
-    plt.plot(ld.svals)

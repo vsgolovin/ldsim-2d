@@ -17,7 +17,7 @@ ld.gen_nonuniform_mesh(y_ext=[0.5, 0.5])
 ld.make_dimensionless()
 ld.solve_equilibrium()
 
-voltages = np.arange(0, 0.51, 0.1)
+voltages = np.arange(0, 2.51, 0.1)
 for v in voltages:
     print(v)
     ld.transport_init(v)
