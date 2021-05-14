@@ -583,8 +583,6 @@ class LaserDiode1D(object):
 
         Parameters
         ----------
-        omega : float
-            Damping parameter (`x += dx*omega`).
         discr : str
             Current density discretiztion scheme.
 
@@ -757,68 +755,40 @@ class LaserDiode1D(object):
         self.sol['J'] = (jn + jp).mean()
 
         # recombination rates (m)
-        R_srh = rec.srh_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                          self.yin['tau_n'][1:-1], self.yin['tau_p'][1:-1])
-        R_rad = rec.rad_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                          self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                          self.yin['B'][1:-1])
-        R_aug = rec.auger_R(self.sol['n'][1:-1], self.sol['p'][1:-1],
-                            self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                            self.yin['Cn'][1:-1], self.yin['Cp'][1:-1])
+        n0 = self.yin['n0'][1:-1]
+        p0 = self.yin['p0'][1:-1]
+        tau_n = self.yin['tau_n'][1:-1]
+        tau_p = self.yin['tau_p'][1:-1]
+        B_rad = self.yin['B'][1:-1]
+        Cn = self.yin['Cn'][1:-1]
+        Cp = self.yin['Cp'][1:-1]
+        R_srh = rec.srh_R(n[1:-1], p[1:-1], n0, p0, tau_n, tau_p)
+        R_rad = rec.rad_R(n[1:-1], p[1:-1], n0, p0, B_rad)
+        R_aug = rec.auger_R(n[1:-1], p[1:-1], n0, p0, Cn, Cp)
         R = (R_srh + R_rad + R_aug)
 
         # recombination rates' derivatives
-        dR_dpsi = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                self.yin['n0'][1:-1],
-                                self.yin['p0'][1:-1],
-                                self.yin['tau_n'][1:-1],
-                                self.yin['tau_p'][1:-1])
-                  +rec.rad_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                self.yin['n0'][1:-1],
-                                self.yin['p0'][1:-1],
-                                self.yin['B'][1:-1])
-                  +rec.auger_Rdot(self.sol['n'][1:-1], dn_dpsi[1:-1],
-                                  self.sol['p'][1:-1], dp_dpsi[1:-1],
-                                  self.yin['n0'][1:-1],
-                                  self.yin['p0'][1:-1],
-                                  self.yin['Cn'][1:-1],
-                                  self.yin['Cp'][1:-1]))
-        dR_dphin = (rec.srh_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                 self.sol['p'][1:-1], 0,
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['tau_n'][1:-1],
-                                 self.yin['tau_p'][1:-1])
-                   +rec.rad_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                 self.sol['p'][1:-1], 0,
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['B'][1:-1])
-                   +rec.auger_Rdot(self.sol['n'][1:-1], dn_dphin[1:-1],
-                                   self.sol['p'][1:-1], 0,
-                                   self.yin['n0'][1:-1],
-                                   self.yin['p0'][1:-1],
-                                   self.yin['Cn'][1:-1],
-                                   self.yin['Cp'][1:-1]))
-        dR_dphip = (rec.srh_Rdot(self.sol['n'][1:-1], 0,
-                                 self.sol['p'][1:-1], dp_dphip[1:-1],
-                                 self.yin['n0'][1:-1],
-                                 self.yin['p0'][1:-1],
-                                 self.yin['tau_n'][1:-1],
-                                 self.yin['tau_p'][1:-1])
-                   +rec.rad_Rdot(self.sol['n'][1:-1], 0,
-                                 self.sol['p'][1:-1], dp_dphip[1:-1],
-                                 self.yin['n0'][1:-1], self.yin['p0'][1:-1],
-                                 self.yin['B'][1:-1])
-                   +rec.auger_Rdot(self.sol['n'][1:-1], 0,
-                                   self.sol['p'][1:-1], dp_dphip[1:-1],
-                                   self.yin['n0'][1:-1],
-                                   self.yin['p0'][1:-1],
-                                   self.yin['Cn'][1:-1],
-                                   self.yin['Cp'][1:-1]))
+        dR_dpsi = (rec.srh_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                p[1:-1], dp_dpsi[1:-1],
+                                n0, p0, tau_n, tau_p)
+                  +rec.rad_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                p[1:-1], dp_dpsi[1:-1],
+                                n0, p0, B_rad)
+                  +rec.auger_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                  p[1:-1], dp_dpsi[1:-1],
+                                  n0, p0, Cn, Cp))
+        dR_dphin = (rec.srh_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                 n0, p0, tau_n, tau_p)
+                   +rec.rad_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                 n0, p0, B_rad)
+                   +rec.auger_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                   n0, p0, Cn, Cp))
+        dR_dphip = (rec.srh_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                 n0, p0, tau_n, tau_p)
+                   +rec.rad_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                 n0, p0, B_rad)
+                   +rec.auger_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                   n0, p0, Cn, Cp))
 
         # calculating residual of the system (m*3)
         rvec = np.zeros(m*3)
