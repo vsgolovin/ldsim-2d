@@ -106,7 +106,7 @@ class LaserDiode1D(object):
         self.yin = dict()  # values at interior nodes
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
-        self.sol['S'] = 0.0
+        self.sol['S'] = 1e-12  # essentially 0
 
         self.gen_uniform_mesh()
         self.is_dimensionless = False
@@ -551,12 +551,7 @@ class LaserDiode1D(object):
         j23 = np.zeros(m)
         j23[:] = self.q*dR_dphip*w
 
-        # 3-diag. form -> sparse matrices
-        j21 = sparse.spdiags(j21, [1, 0, -1], m, m)
-        j22 = sparse.spdiags(j22, [1, 0, -1], m, m)
-        j23 = sparse.spdiags(j23, [0,], m, m)
-        J2 = sparse.hstack([j21, j22, j23])
-        return J2
+        return j21, j22, j23
 
     def _jp_cont_jac(self, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2,
                      dR_dpsi, dR_dphin, dR_dphip, w):
@@ -580,12 +575,7 @@ class LaserDiode1D(object):
         j33[1, :] = -self.q*dR_dphip*w - (djp_dphip1[1:]-djp_dphip2[:-1])
         j33[2, :-1] = djp_dphip1[1:-1]
 
-        # 3-diag. form -> sparse matrices
-        j31 = sparse.spdiags(j31, [1, 0, -1], m, m)
-        j32 = sparse.spdiags(j32, [0,], m, m)
-        j33 = sparse.spdiags(j33, [1, 0, -1], m, m)
-        J3 = sparse.hstack([j31, j32, j33])
-        return J3
+        return j31, j32, j33
 
     def _transport_system(self, discr='mSG'):
         """
@@ -843,24 +833,42 @@ class LaserDiode1D(object):
                                   self.eps_0, self.q)
         j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
         j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
-        j11 = sparse.spdiags(j11, [1, 0, -1], m, m)
-        j12 = sparse.spdiags(j12, [0,], m, m)
-        j13 = sparse.spdiags(j13, [0,], m, m)
-        J1 = sparse.hstack([j11, j12, j13])
 
         # 2. Electron current continuity equation
-        J2 = self._jn_cont_jac(djn_dpsi1, djn_dpsi2,
+        j21, j22, j23 = self._jn_cont_jac(djn_dpsi1, djn_dpsi2,
                                           djn_dphin1, djn_dphin2,
                                           dR_dpsi, dR_dphin, dR_dphip, w)
 
         # 3. Hole current continuity equation
-        J3 = self._jp_cont_jac(djp_dpsi1, djp_dpsi2,
+        j31, j32, j33 = self._jp_cont_jac(djp_dpsi1, djp_dpsi2,
                                           djp_dphip1, djp_dphip2,
                                           dR_dpsi, dR_dphin, dR_dphip, w)
 
-        # calculating update vector dx
-        J = sparse.vstack([J1, J2, J3])
-        J = J.tocsc()
+        # collect Jacobian diagonals
+        data = np.zeros((11, 3*m))
+        data[0, 2*m:   ] = j13
+        data[1,   m:2*m] = j12
+        data[1, 2*m:   ] = j23
+        data[2,    :m  ] = j11[0]
+        data[2,   m:2*m] = j22[0]
+        data[2, 2*m:   ] = j33[0]
+        data[3,    :m  ] = j11[1]
+        data[3,   m:2*m] = j22[1]
+        data[3, 2*m:   ] = j33[1]
+        data[4,    :m  ] = j11[2]
+        data[4,   m:2*m] = j22[2]
+        data[4, 2*m:   ] = j33[2]
+        data[5,    :m  ] = j21[0]
+        data[6,    :m  ] = j21[1]
+        data[6,   m:2*m] = j32
+        data[7,    :m  ] = j21[2]
+        data[8,    :m  ] = j31[0]
+        data[9,    :m  ] = j31[1]
+        data[10,   :m  ] = j31[2]
+
+        # assemble sparse matrix
+        diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
+        J = sparse.spdiags(data=data, diags=diags, m=3*m, n=3*m, format='csc')
 
         return J, rvec
 
@@ -999,7 +1007,7 @@ class LaserDiode1D(object):
                                 self.yin['B'][self.ar_ix])
 
         # photon density rate equation residual
-        r4 = (self.beta_sp*np.sum(R*w)/self.xin[-1]
+        r4 = (self.beta_sp*np.sum(R*w*T)
               + self.vg*total_gain*S)
         rvec = np.concatenate([rvec, np.array([r4])])
 
@@ -1007,11 +1015,11 @@ class LaserDiode1D(object):
         m = self.npoints - 2
         J4 = np.zeros(3*m+1)
         inds = np.where(self.ar_ix)[0] - 1
-        J4[inds] = (self.beta_sp*dR_dpsi*w/self.xin[-1]
+        J4[inds] = (self.beta_sp*dR_dpsi*w*T
                      +self.vg*gain_dpsi*w*T*S)
-        J4[inds+m] = (self.beta_sp*dR_dphin*w/self.xin[-1]
+        J4[inds+m] = (self.beta_sp*dR_dphin*w*T
                       +self.vg*gain_dphin*w*T*S)
-        J4[inds+2*m] = (self.beta_sp*dR_dphip*w/self.xin[-1]
+        J4[inds+2*m] = (self.beta_sp*dR_dphip*w*T
                        +self.vg*gain_dphip*w*T*S)
         J4[-1] = self.vg*total_gain
 
@@ -1075,6 +1083,7 @@ class LaserDiode1D(object):
             self.sol['S'] += dx[-1] * omega_S[1]
 
         return fluct
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -1148,7 +1157,6 @@ if __name__ == '__main__':
           end=' ')
     ld.transport_init(0.1)
     ld.sol['S'] = 0
-    # rvec, J = ld.lasing_step()
     for _ in range(nsteps):
         ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
     print('Complete.')
