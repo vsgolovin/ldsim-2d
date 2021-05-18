@@ -514,7 +514,7 @@ class LaserDiode1D(object):
 
     def transport_init(self, voltage, psi_init=None, phi_n_init=None,
                        phi_p_init=None):
-        "Initialize carrier transport problem at some external voltage."
+        "Initialize diode drift-diffusion problem."
         self.iterations = 0
         self.fluct = list()
 
@@ -892,6 +892,14 @@ class LaserDiode1D(object):
         p = self.sol['p'][1:-1]
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
+
+    def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
+                    phi_p_init=None, S_init=None):
+        "Initialize laser diode drift-diffusion problem."
+        self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
+        if S_init is not None:
+            assert isinstance(S_init, (float, int))
+            self.sol['S'] = S_init
 
     def _lasing_system(self, discr='mSG'):
         """
