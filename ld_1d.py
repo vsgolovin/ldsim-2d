@@ -1083,43 +1083,31 @@ class LaserDiode1D(object):
         j34 = np.zeros(m)
         j34[ixa[1:-1]] = -self.q * dRst_dS
 
-        J = np.zeros((3*m+1, 3*m+1))
-        # Poisson's equation
-        J[np.arange(0, m), np.arange(2*m, 3*m)] = j13
-        J[np.arange(0, m), np.arange(m, 2*m)] = j12
-        J[np.arange(0, m-1), np.arange(1, m)] = j11[0, 1:]
-        J[np.arange(0, m), np.arange(0, m)] = j11[1]
-        J[np.arange(1, m), np.arange(0, m-1)] = j11[2, :-1]
-        # electron current continuity equation
-        J[np.arange(m, 2*m), np.arange(2*m, 3*m)] = j23
-        J[np.arange(m, 2*m-1), np.arange(m+1, 2*m)] = j22[0, 1:]
-        J[np.arange(m, 2*m), np.arange(m, 2*m)] = j22[1, :]
-        J[np.arange(m+1, 2*m), np.arange(m, 2*m-1)] = j22[2, :-1]
-        J[np.arange(m, 2*m-1), np.arange(1, m)] = j21[0, 1:]
-        J[np.arange(m, 2*m), np.arange(0, m)] = j21[1, :]
-        J[np.arange(m+1, 2*m), np.arange(0, m-1)] = j21[2, :-1]
-        # hole current continuity equation
-        J[np.arange(2*m, 3*m-1), np.arange(2*m+1, 3*m)] = j33[0, 1:]
-        J[np.arange(2*m, 3*m), np.arange(2*m, 3*m)] = j33[1, :]
-        J[np.arange(2*m+1, 3*m), np.arange(2*m, 3*m-1)] = j33[2, :-1]
-        J[np.arange(2*m, 3*m), np.arange(m, 2*m)] = j32
-        J[np.arange(2*m, 3*m-1), np.arange(1, m)] = j31[0, 1:]
-        J[np.arange(2*m, 3*m), np.arange(0, m)] = j31[1, :]
-        J[np.arange(2*m+1, 3*m), np.arange(0, m-1)] = j31[2, :-1]
-        # rightmost column -- derivatives w.r.t. S
-        J[m:2*m, -1] = j24
-        J[2*m:3*m, -1] = j34
-        # bottom row -- photon density rate equation
-        J[-1, :m][ixa[1:-1]] = (self.beta_sp * dRrad_dpsi[ixa[1:-1]]
-                                * w_ar * T
-                                + self.vg * gain_dpsi * w_ar * T * S)
-        J[-1, m:2*m][ixa[1:-1]] = (self.beta_sp * dRrad_dphin[ixa[1:-1]]
-                                   * w_ar * T
-                                   + self.vg * gain_dphin * w_ar * T * S)
-        J[-1, 2*m:3*m][ixa[1:-1]] = (self.beta_sp * dR_dphip[ixa[1:-1]]
-                                     * w_ar * T * S
-                                     + self.vg * gain_dphip * w_ar * T * S)
-        J[-1, -1] = self.vg * total_gain
+        # collect Jacobian diagonals
+        data = np.zeros((11, 3*m))
+        data[0, 2*m:   ] = j13
+        data[1,   m:2*m] = j12
+        data[1, 2*m:   ] = j23
+        data[2,    :m  ] = j11[0]
+        data[2,   m:2*m] = j22[0]
+        data[2, 2*m:   ] = j33[0]
+        data[3,    :m  ] = j11[1]
+        data[3,   m:2*m] = j22[1]
+        data[3, 2*m:   ] = j33[1]
+        data[4,    :m  ] = j11[2]
+        data[4,   m:2*m] = j22[2]
+        data[4, 2*m:   ] = j33[2]
+        data[5,    :m  ] = j21[0]
+        data[6,    :m  ] = j21[1]
+        data[6,   m:2*m] = j32
+        data[7,    :m  ] = j21[2]
+        data[8,    :m  ] = j31[0]
+        data[9,    :m  ] = j31[1]
+        data[10,   :m  ] = j31[2]
+
+        # assemble sparse matrix
+        diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
+        J = sparse.spdiags(data=data, diags=diags, m=3*m+1, n=3*m+1, format='lil')
 
         # rightmost column -- derivatives w.r.t. S
         J[m:2*m, -1] = j24
@@ -1136,7 +1124,8 @@ class LaserDiode1D(object):
                                      * w_ar * T * S
                                      + self.vg * gain_dphip * w_ar * T * S)
         J[-1, -1] = self.vg * total_gain
-        J = sparse.csc_matrix(J)
+ 
+        J = J.tocsc()
 
         return J, rvec
 
