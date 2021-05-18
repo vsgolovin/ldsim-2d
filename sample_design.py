@@ -3,7 +3,7 @@
 Sample epitaxial design.
 """
 
-from slice_1d import Layer, Slice
+from design_1d import Layer, Design1D
 
 # GaAs n-contact
 l1 = Layer('n-cont', 0.3e-4)
@@ -145,6 +145,6 @@ l7.set_parameter('n_refr', 3.493)
 l7.set_parameter('g0', 1500)
 l7.set_parameter('N_tr', 1.85e18)
 
-sl = Slice()
-for l in [l1, l2, l3, l4, l5, l6, l7]:
-    sl.add_layer(l)
+sd = Design1D()
+for layer in [l1, l2, l3, l4, l5, l6, l7]:
+    sd.add_layer(layer)

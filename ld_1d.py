@@ -72,7 +72,7 @@ class LaserDiode1D(object):
         # and if active region indices correspond to actual layers
         assert isinstance(design, Design1D)
         inds = list()
-        for ind, layer in slc.layers.items():
+        for ind, layer in design.layers.items():
             inds.append(ind)
             layer.check(inp_params)  # raises exception if fails
         if isinstance(ar_inds, int):
@@ -1284,13 +1284,13 @@ class LaserDiode1D(object):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from sample_slice import sl
+    from sample_design import sd
 
     plt.rc('lines', linewidth=0.7)
     plt.rc('figure.subplot', left=0.15, right=0.85)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
-    ld = LaserDiode1D(slc=sl, ar_inds=3,
+    ld = LaserDiode1D(design=sd, ar_inds=3,
                       L=3000e-4, w=100e-4,
                       R1=0.95, R2=0.05,
                       lam=0.87e-4, ng=3.9,
