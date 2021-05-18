@@ -535,6 +535,170 @@ class LaserDiode1D(object):
         self.sol['phi_p'][0] = -voltage/2
         self.sol['phi_p'][-1] = voltage/2
 
+    def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+
+        # electron densities at finite volume boundaries (m+1)
+        n1 = cc.n(psi[:-1], phi_n[:-1], self.ybn['Nc'], self.ybn['Ec'],
+                  self.Vt)
+        n2 = cc.n(psi[1:], phi_n[1:], self.ybn['Nc'], self.ybn['Ec'],
+                  self.Vt)
+
+        # forward (2-2) and backward (1-1) derivatives
+        # w.r.t. volume boundaries (m+1)
+        dn1_dpsi1 = cc.dn_dpsi(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                               self.ybn['Ec'], self.Vt)
+        dn2_dpsi2 = cc.dn_dpsi(psi[1:], phi_n[1:], self.ybn['Nc'],
+                               self.ybn['Ec'], self.Vt)
+        dn1_dphin1 = cc.dn_dphin(psi[:-1], phi_n[:-1], self.ybn['Nc'],
+                                 self.ybn['Ec'], self.Vt)
+        dn2_dphin2 = cc.dn_dphin(psi[1:], phi_n[1:], self.ybn['Nc'],
+                                 self.ybn['Ec'], self.Vt)
+
+        # current densities and their derivatives (m+1)
+        jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
+                        self.Vt, self.q, self.ybn['mu_n'])
+        djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_n'])
+        djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+        djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_n'])
+
+        return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
+
+    def _jp_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+
+        psi = self.sol['psi']
+        phi_p = self.sol['phi_p']
+
+        # hole densities at finite volume boundaries (m+1)
+        p1 = cc.p(psi[:-1], phi_p[:-1], self.ybn['Nv'], self.ybn['Ev'],
+                  self.Vt)
+        p2 = cc.p(psi[1:], phi_p[1:], self.ybn['Nv'], self.ybn['Ev'],
+                  self.Vt)
+
+        # forward (2-2) and backward (1-1) derivatives
+        # w.r.t. volume boundaries (m+1)
+        dp1_dpsi1 = cc.dp_dpsi(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                               self.ybn['Ev'], self.Vt)
+        dp2_dpsi2 = cc.dp_dpsi(psi[1:], phi_p[1:], self.ybn['Nv'],
+                               self.ybn['Ev'], self.Vt)
+        dp1_dphip1 = cc.dp_dphip(psi[:-1], phi_p[:-1], self.ybn['Nv'],
+                                 self.ybn['Ev'], self.Vt)
+        dp2_dphip2 = cc.dp_dphip(psi[1:], phi_p[1:], self.ybn['Nv'],
+                                 self.ybn['Ev'], self.Vt)
+
+        # current densities and their derivatives (m+1)
+        jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
+                        self.Vt, self.q, self.ybn['mu_p'])
+        djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus,
+                                      Bdot_plus, Bdot_minus, h, self.Vt,
+                                      self.q, self.ybn['mu_p'])
+        djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+        djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, self.Vt,
+                                        self.q, self.ybn['mu_p'])
+
+        return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
+
+    def _jn_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+
+        # n = Nc * F(nu_n)
+        F = sdf.fermi_fdint
+        nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
+        nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
+        exp_nu_n1 = np.exp(nu_n1)
+        exp_nu_n2 = np.exp(nu_n2)
+
+        # electron current density (m+1)
+        gn = flux.g(nu_n1, nu_n2, F)
+        jn_SG = flux.oSG_jn(exp_nu_n1, exp_nu_n2, B_plus, B_minus,
+                            h, self.ybn['Nc'], self.Vt, self.q,
+                            self.ybn['mu_n'])
+        jn = jn_SG * gn
+
+        # electron current density derivatives (m+1)
+        Fdot = sdf.fermi_dot_fdint
+        gdot_n1 = flux.gdot(gn, nu_n1, F, Fdot) / self.Vt
+        gdot_n2 = flux.gdot(gn, nu_n2, F, Fdot) / self.Vt
+        djn_dpsi1_SG = flux.oSG_djn_dpsi1(exp_nu_n1, exp_nu_n2,
+                                          B_minus, Bdot_plus, Bdot_minus,
+                                          h, self.ybn['Nc'], self.q,
+                                          self.ybn['mu_n'])
+        djn_dpsi1 = flux.mSG_jdot(jn_SG, djn_dpsi1_SG, gn, gdot_n1)
+        djn_dpsi2_SG = flux.oSG_djn_dpsi2(exp_nu_n1, exp_nu_n2,
+                                          B_plus, Bdot_plus, Bdot_minus,
+                                          h, self.ybn['Nc'], self.q,
+                                          self.ybn['mu_n'])
+        djn_dpsi2 = flux.mSG_jdot(jn_SG, djn_dpsi2_SG, gn, gdot_n2)
+        djn_dphin1_SG = flux.oSG_djn_dphin1(exp_nu_n1, B_minus, h,
+                                            self.ybn['Nc'], self.q,
+                                            self.ybn['mu_n'])
+        djn_dphin1 = flux.mSG_jdot(jn_SG, djn_dphin1_SG, gn, -gdot_n1)
+        djn_dphin2_SG = flux.oSG_djn_dphin2(exp_nu_n2, B_plus, h,
+                                            self.ybn['Nc'], self.q,
+                                            self.ybn['mu_n'])
+        djn_dphin2 = flux.mSG_jdot(jn_SG, djn_dphin2_SG, gn, -gdot_n2)
+
+        return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
+
+    def _jp_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+
+        psi = self.sol['psi']
+        phi_p = self.sol['phi_p']
+
+        #  p = Nv * F(nu_p)
+        F = sdf.fermi_fdint
+        nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
+        nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
+        exp_nu_p1 = np.exp(nu_p1)
+        exp_nu_p2 = np.exp(nu_p2)
+
+        # hole current density (m+1)
+        gp = flux.g(nu_p1, nu_p2, F)
+        jp_SG = flux.oSG_jp(exp_nu_p1, exp_nu_p2, B_plus, B_minus,
+                            h, self.ybn['Nv'], self.Vt, self.q,
+                            self.ybn['mu_p'])
+        jp = jp_SG * gp
+
+        # hole current density derivatives (m+1)
+        Fdot = sdf.fermi_dot_fdint
+        gdot_p1 = flux.gdot(gp, nu_p1, F, Fdot) / self.Vt
+        gdot_p2 = flux.gdot(gp, nu_p2, F, Fdot) / self.Vt
+        djp_dpsi1_SG = flux.oSG_djp_dpsi1(exp_nu_p1, exp_nu_p2,
+                                          B_plus, Bdot_plus, Bdot_minus,
+                                          h, self.ybn['Nv'], self.q,
+                                          self.ybn['mu_p'])
+        djp_dpsi1 = flux.mSG_jdot(jp_SG, djp_dpsi1_SG, gp, -gdot_p1)
+        djp_dpsi2_SG = flux.oSG_djp_dpsi2(exp_nu_p1, exp_nu_p2,
+                                          B_minus, Bdot_plus, Bdot_minus,
+                                          h, self.ybn['Nv'], self.q,
+                                          self.ybn['mu_p'])
+        djp_dpsi2 = flux.mSG_jdot(jp_SG, djp_dpsi2_SG, gp, -gdot_p2)
+        djp_dphip1_SG = flux.oSG_djp_dphip1(exp_nu_p1, B_plus, h,
+                                            self.ybn['Nv'], self.q,
+                                            self.ybn['mu_p'])
+        djp_dphip1 = flux.mSG_jdot(jp_SG, djp_dphip1_SG, gp, gdot_p1)
+        djp_dphip2_SG = flux.oSG_djp_dphip2(exp_nu_p2, B_minus, h,
+                                            self.ybn['Nv'], self.q,
+                                            self.ybn['mu_p'])
+        djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
+
+        return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
+
     def _transport_system(self, discr='mSG'):
         """
         Calculate Jacobian and residual for the transport problem.
@@ -582,128 +746,16 @@ class LaserDiode1D(object):
 
         # calculating current densities and their derivatives
         if discr == 'SG':  # Scharfetter-Gummel discretization
-
-            # carrier densities at finite volume boundaries (m+1)
-            n1 = cc.n(psi[:-1], phi_n[:-1], self.ybn['Nc'], self.ybn['Ec'],
-                      self.Vt)
-            n2 = cc.n(psi[1:], phi_n[1:], self.ybn['Nc'], self.ybn['Ec'],
-                      self.Vt)
-            p1 = cc.p(psi[:-1], phi_p[:-1], self.ybn['Nv'], self.ybn['Ev'],
-                      self.Vt)
-            p2 = cc.p(psi[1:], phi_p[1:], self.ybn['Nv'], self.ybn['Ev'],
-                      self.Vt)
-            # forward (2-2) and backward (1-1) derivatives
-            # w.r.t. volume boundaries (m+1)
-            dn1_dpsi1 = cc.dn_dpsi(psi[:-1], phi_n[:-1], self.ybn['Nc'],
-                                   self.ybn['Ec'], self.Vt)
-            dn2_dpsi2 = cc.dn_dpsi(psi[1:], phi_n[1:], self.ybn['Nc'],
-                                   self.ybn['Ec'], self.Vt)
-            dn1_dphin1 = cc.dn_dphin(psi[:-1], phi_n[:-1], self.ybn['Nc'],
-                                     self.ybn['Ec'], self.Vt)
-            dn2_dphin2 = cc.dn_dphin(psi[1:], phi_n[1:], self.ybn['Nc'],
-                                     self.ybn['Ec'], self.Vt)
-            dp1_dpsi1 = cc.dp_dpsi(psi[:-1], phi_p[:-1], self.ybn['Nv'],
-                                   self.ybn['Ev'], self.Vt)
-            dp2_dpsi2 = cc.dp_dpsi(psi[1:], phi_p[1:], self.ybn['Nv'],
-                                   self.ybn['Ev'], self.Vt)
-            dp1_dphip1 = cc.dp_dphip(psi[:-1], phi_p[:-1], self.ybn['Nv'],
-                                     self.ybn['Ev'], self.Vt)
-            dp2_dphip2 = cc.dp_dphip(psi[1:], phi_p[1:], self.ybn['Nv'],
-                                     self.ybn['Ev'], self.Vt)
-
-            # current densities and their derivatives (m+1)
-            jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
-                            self.Vt, self.q, self.ybn['mu_n'])
-            jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
-                            self.Vt, self.q, self.ybn['mu_p'])
-            djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_n'])
-            djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_n'])
-            djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, self.Vt,
-                                            self.q, self.ybn['mu_n'])
-            djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, self.Vt,
-                                            self.q, self.ybn['mu_n'])
-            djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_p'])
-            djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_p'])
-            djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, self.Vt,
-                                            self.q, self.ybn['mu_p'])
-            djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, self.Vt,
-                                            self.q, self.ybn['mu_p'])
+            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
         elif discr == 'mSG':  # modified SG discretization
-
-            # n = Nc * F(nu_n), p = Nv * F(nu_p)
-            F = sdf.fermi_fdint
-            nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
-            nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
-            nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
-            nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
-            exp_nu_n1 = np.exp(nu_n1)
-            exp_nu_n2 = np.exp(nu_n2)
-            exp_nu_p1 = np.exp(nu_p1)
-            exp_nu_p2 = np.exp(nu_p2)
-
-            # current densities (m+1)
-            gn = flux.g(nu_n1, nu_n2, F)
-            gp = flux.g(nu_p1, nu_p2, F)
-            jn_SG = flux.oSG_jn(exp_nu_n1, exp_nu_n2, B_plus, B_minus,
-                                h, self.ybn['Nc'], self.Vt, self.q,
-                                self.ybn['mu_n'])
-            jp_SG = flux.oSG_jp(exp_nu_p1, exp_nu_p2, B_plus, B_minus,
-                                h, self.ybn['Nv'], self.Vt, self.q,
-                                self.ybn['mu_p'])
-            jn = jn_SG * gn
-            jp = jp_SG * gp
-
-            # current densities' derivatives
-            Fdot = sdf.fermi_dot_fdint
-            gdot_n1 = flux.gdot(gn, nu_n1, F, Fdot) / self.Vt
-            gdot_n2 = flux.gdot(gn, nu_n2, F, Fdot) / self.Vt
-            gdot_p1 = flux.gdot(gp, nu_p1, F, Fdot) / self.Vt
-            gdot_p2 = flux.gdot(gp, nu_p2, F, Fdot) / self.Vt
-            djn_dpsi1_SG = flux.oSG_djn_dpsi1(exp_nu_n1, exp_nu_n2,
-                                            B_minus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nc'], self.q,
-                                            self.ybn['mu_n'])
-            djn_dpsi1 = flux.mSG_jdot(jn_SG, djn_dpsi1_SG, gn, gdot_n1)
-            djn_dpsi2_SG = flux.oSG_djn_dpsi2(exp_nu_n1, exp_nu_n2,
-                                            B_plus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nc'], self.q,
-                                            self.ybn['mu_n'])
-            djn_dpsi2 = flux.mSG_jdot(jn_SG, djn_dpsi2_SG, gn, gdot_n2)
-            djn_dphin1_SG = flux.oSG_djn_dphin1(exp_nu_n1, B_minus, h,
-                                                self.ybn['Nc'], self.q,
-                                                self.ybn['mu_n'])
-            djn_dphin1 = flux.mSG_jdot(jn_SG, djn_dphin1_SG, gn, -gdot_n1)
-            djn_dphin2_SG = flux.oSG_djn_dphin2(exp_nu_n2, B_plus, h,
-                                                self.ybn['Nc'], self.q,
-                                                self.ybn['mu_n'])
-            djn_dphin2 = flux.mSG_jdot(jn_SG, djn_dphin2_SG, gn, -gdot_n2)
-            djp_dpsi1_SG = flux.oSG_djp_dpsi1(exp_nu_p1, exp_nu_p2,
-                                            B_plus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nv'], self.q,
-                                            self.ybn['mu_p'])
-            djp_dpsi1 = flux.mSG_jdot(jp_SG, djp_dpsi1_SG, gp, -gdot_p1)
-            djp_dpsi2_SG = flux.oSG_djp_dpsi2(exp_nu_p1, exp_nu_p2,
-                                            B_minus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nv'], self.q,
-                                            self.ybn['mu_p'])
-            djp_dpsi2 = flux.mSG_jdot(jp_SG, djp_dpsi2_SG, gp, -gdot_p2)
-            djp_dphip1_SG = flux.oSG_djp_dphip1(exp_nu_p1, B_plus, h,
-                                                self.ybn['Nv'], self.q,
-                                                self.ybn['mu_p'])
-            djp_dphip1 = flux.mSG_jdot(jp_SG, djp_dphip1_SG, gp, gdot_p1)
-            djp_dphip2_SG = flux.oSG_djp_dphip2(exp_nu_p2, B_minus, h,
-                                                self.ybn['Nv'], self.q,
-                                                self.ybn['mu_p'])
-            djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
+            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
         else:
             raise Exception('Error: unknown current density '
@@ -841,7 +893,7 @@ class LaserDiode1D(object):
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
 
-    def _lasing_system(self, omega=1.0, discr='mSG'):
+    def _lasing_system(self, discr='mSG'):
         """
         Calculate Jacobian and residual for the lasing problem.
 
@@ -888,128 +940,16 @@ class LaserDiode1D(object):
 
         # calculating current densities and their derivatives
         if discr == 'SG':  # Scharfetter-Gummel discretization
-
-            # carrier densities at finite volume boundaries (m+1)
-            n1 = cc.n(psi[:-1], phi_n[:-1], self.ybn['Nc'], self.ybn['Ec'],
-                      self.Vt)
-            n2 = cc.n(psi[1:], phi_n[1:], self.ybn['Nc'], self.ybn['Ec'],
-                      self.Vt)
-            p1 = cc.p(psi[:-1], phi_p[:-1], self.ybn['Nv'], self.ybn['Ev'],
-                      self.Vt)
-            p2 = cc.p(psi[1:], phi_p[1:], self.ybn['Nv'], self.ybn['Ev'],
-                      self.Vt)
-            # forward (2-2) and backward (1-1) derivatives
-            # w.r.t. volume boundaries (m+1)
-            dn1_dpsi1 = cc.dn_dpsi(psi[:-1], phi_n[:-1], self.ybn['Nc'],
-                                   self.ybn['Ec'], self.Vt)
-            dn2_dpsi2 = cc.dn_dpsi(psi[1:], phi_n[1:], self.ybn['Nc'],
-                                   self.ybn['Ec'], self.Vt)
-            dn1_dphin1 = cc.dn_dphin(psi[:-1], phi_n[:-1], self.ybn['Nc'],
-                                     self.ybn['Ec'], self.Vt)
-            dn2_dphin2 = cc.dn_dphin(psi[1:], phi_n[1:], self.ybn['Nc'],
-                                     self.ybn['Ec'], self.Vt)
-            dp1_dpsi1 = cc.dp_dpsi(psi[:-1], phi_p[:-1], self.ybn['Nv'],
-                                   self.ybn['Ev'], self.Vt)
-            dp2_dpsi2 = cc.dp_dpsi(psi[1:], phi_p[1:], self.ybn['Nv'],
-                                   self.ybn['Ev'], self.Vt)
-            dp1_dphip1 = cc.dp_dphip(psi[:-1], phi_p[:-1], self.ybn['Nv'],
-                                     self.ybn['Ev'], self.Vt)
-            dp2_dphip2 = cc.dp_dphip(psi[1:], phi_p[1:], self.ybn['Nv'],
-                                     self.ybn['Ev'], self.Vt)
-
-            # current densities and their derivatives (m+1)
-            jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
-                            self.Vt, self.q, self.ybn['mu_n'])
-            jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
-                            self.Vt, self.q, self.ybn['mu_p'])
-            djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_n'])
-            djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_n'])
-            djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, self.Vt,
-                                            self.q, self.ybn['mu_n'])
-            djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, self.Vt,
-                                            self.q, self.ybn['mu_n'])
-            djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_p'])
-            djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus,
-                                          Bdot_plus, Bdot_minus, h, self.Vt,
-                                          self.q, self.ybn['mu_p'])
-            djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, self.Vt,
-                                            self.q, self.ybn['mu_p'])
-            djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, self.Vt,
-                                            self.q, self.ybn['mu_p'])
+            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
         elif discr == 'mSG':  # modified SG discretization
-
-            # n = Nc * F(nu_n), p = Nv * F(nu_p)
-            F = sdf.fermi_fdint
-            nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
-            nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
-            nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
-            nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
-            exp_nu_n1 = np.exp(nu_n1)
-            exp_nu_n2 = np.exp(nu_n2)
-            exp_nu_p1 = np.exp(nu_p1)
-            exp_nu_p2 = np.exp(nu_p2)
-
-            # current densities (m+1)
-            gn = flux.g(nu_n1, nu_n2, F)
-            gp = flux.g(nu_p1, nu_p2, F)
-            jn_SG = flux.oSG_jn(exp_nu_n1, exp_nu_n2, B_plus, B_minus,
-                                h, self.ybn['Nc'], self.Vt, self.q,
-                                self.ybn['mu_n'])
-            jp_SG = flux.oSG_jp(exp_nu_p1, exp_nu_p2, B_plus, B_minus,
-                                h, self.ybn['Nv'], self.Vt, self.q,
-                                self.ybn['mu_p'])
-            jn = jn_SG * gn
-            jp = jp_SG * gp
-
-            # current densities' derivatives
-            Fdot = sdf.fermi_dot_fdint
-            gdot_n1 = flux.gdot(gn, nu_n1, F, Fdot) / self.Vt
-            gdot_n2 = flux.gdot(gn, nu_n2, F, Fdot) / self.Vt
-            gdot_p1 = flux.gdot(gp, nu_p1, F, Fdot) / self.Vt
-            gdot_p2 = flux.gdot(gp, nu_p2, F, Fdot) / self.Vt
-            djn_dpsi1_SG = flux.oSG_djn_dpsi1(exp_nu_n1, exp_nu_n2,
-                                            B_minus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nc'], self.q,
-                                            self.ybn['mu_n'])
-            djn_dpsi1 = flux.mSG_jdot(jn_SG, djn_dpsi1_SG, gn, gdot_n1)
-            djn_dpsi2_SG = flux.oSG_djn_dpsi2(exp_nu_n1, exp_nu_n2,
-                                            B_plus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nc'], self.q,
-                                            self.ybn['mu_n'])
-            djn_dpsi2 = flux.mSG_jdot(jn_SG, djn_dpsi2_SG, gn, gdot_n2)
-            djn_dphin1_SG = flux.oSG_djn_dphin1(exp_nu_n1, B_minus, h,
-                                                self.ybn['Nc'], self.q,
-                                                self.ybn['mu_n'])
-            djn_dphin1 = flux.mSG_jdot(jn_SG, djn_dphin1_SG, gn, -gdot_n1)
-            djn_dphin2_SG = flux.oSG_djn_dphin2(exp_nu_n2, B_plus, h,
-                                                self.ybn['Nc'], self.q,
-                                                self.ybn['mu_n'])
-            djn_dphin2 = flux.mSG_jdot(jn_SG, djn_dphin2_SG, gn, -gdot_n2)
-            djp_dpsi1_SG = flux.oSG_djp_dpsi1(exp_nu_p1, exp_nu_p2,
-                                            B_plus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nv'], self.q,
-                                            self.ybn['mu_p'])
-            djp_dpsi1 = flux.mSG_jdot(jp_SG, djp_dpsi1_SG, gp, -gdot_p1)
-            djp_dpsi2_SG = flux.oSG_djp_dpsi2(exp_nu_p1, exp_nu_p2,
-                                            B_minus, Bdot_plus, Bdot_minus,
-                                            h, self.ybn['Nv'], self.q,
-                                            self.ybn['mu_p'])
-            djp_dpsi2 = flux.mSG_jdot(jp_SG, djp_dpsi2_SG, gp, -gdot_p2)
-            djp_dphip1_SG = flux.oSG_djp_dphip1(exp_nu_p1, B_plus, h,
-                                                self.ybn['Nv'], self.q,
-                                                self.ybn['mu_p'])
-            djp_dphip1 = flux.mSG_jdot(jp_SG, djp_dphip1_SG, gp, gdot_p1)
-            djp_dphip2_SG = flux.oSG_djp_dphip2(exp_nu_p2, B_minus, h,
-                                                self.ybn['Nv'], self.q,
-                                                self.ybn['mu_p'])
-            djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
+            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
         else:
             raise Exception('Error: unknown current density '
@@ -1206,7 +1146,6 @@ class LaserDiode1D(object):
         discr : str
             Current density discretiztion scheme.
 
-       
         """
         # residual vector and Jacobian for transport problem
         J, rvec = self._lasing_system(discr)
