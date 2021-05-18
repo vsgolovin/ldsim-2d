@@ -535,54 +535,6 @@ class LaserDiode1D(object):
         self.sol['phi_p'][0] = -voltage/2
         self.sol['phi_p'][-1] = voltage/2
 
-    def _jn_cont_jac(self, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2,
-                     dR_dpsi, dR_dphin, dR_dphip, w):
-        "Calculate Jacobian of electron current density continuity eq."
-
-        m = self.npoints - 2
-
-        # dF2 / dpsi
-        j21 = np.zeros((3, m))
-        j21[0, 1:] = -djn_dpsi2[1:-1]
-        j21[1, :] = self.q*dR_dpsi*w - (djn_dpsi1[1:]-djn_dpsi2[:-1])
-        j21[2, :-1] = djn_dpsi1[1:-1]
-
-        # dF2 / dphi_n
-        j22 = np.zeros((3, m))
-        j22[0, 1:] = -djn_dphin2[1:-1]
-        j22[1, :] = self.q*dR_dphin*w - (djn_dphin1[1:]-djn_dphin2[:-1])
-        j22[2, :-1] = djn_dphin1[1:-1]
-
-        # dF2 / dphi_p
-        j23 = np.zeros(m)
-        j23[:] = self.q*dR_dphip*w
-
-        return j21, j22, j23
-
-    def _jp_cont_jac(self, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2,
-                     dR_dpsi, dR_dphin, dR_dphip, w):
-        "Calculate Jacobian of electron current density continuity eq."
-
-        m = self.npoints - 2
-
-        # dF3 / dpsi
-        j31 = np.zeros((3, m))
-        j31[0, 1:] = -djp_dpsi2[1:-1]
-        j31[1, :] = -self.q*dR_dpsi*w - (djp_dpsi1[1:]-djp_dpsi2[:-1])
-        j31[2, :-1] = djp_dpsi1[1:-1]
-
-        # dF3 / dphi_n
-        j32 = np.zeros(m)
-        j32[:] = -self.q*dR_dphin*w
-
-        # dF3 / dphi_p
-        j33 = np.zeros((3, m))
-        j33[0, 1:] = -djp_dphip2[1:-1]
-        j33[1, :] = -self.q*dR_dphip*w - (djp_dphip1[1:]-djp_dphip2[:-1])
-        j33[2, :-1] = djp_dphip1[1:-1]
-
-        return j31, j32, j33
-
     def _transport_system(self, discr='mSG'):
         """
         Calculate Jacobian and residual for the transport problem.
@@ -811,14 +763,16 @@ class LaserDiode1D(object):
         j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
 
         # 2. Electron current continuity equation
-        j21, j22, j23 = self._jn_cont_jac(djn_dpsi1, djn_dpsi2,
-                                          djn_dphin1, djn_dphin2,
-                                          dR_dpsi, dR_dphin, dR_dphip, w)
+        j21 = vrs.jn_dF_dpsi(djn_dpsi1, djn_dpsi2, dR_dpsi, w, self.q, m)
+        j22 = vrs.jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin,
+                              w, self.q, m)
+        j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
 
         # 3. Hole current continuity equation
-        j31, j32, j33 = self._jp_cont_jac(djp_dpsi1, djp_dpsi2,
-                                          djp_dphip1, djp_dphip2,
-                                          dR_dpsi, dR_dphin, dR_dphip, w)
+        j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, self.q, m)
+        j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
+        j33 = vrs.jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip,
+                              w, self.q, m)
 
         # collect Jacobian diagonals
         data = np.zeros((11, 3*m))
@@ -1160,9 +1114,10 @@ class LaserDiode1D(object):
         j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
 
         # 2. Electron current continuity equation
-        j21, j22, j23 = self._jn_cont_jac(djn_dpsi1, djn_dpsi2,
-                                          djn_dphin1, djn_dphin2,
-                                          dR_dpsi, dR_dphin, dR_dphip, w)
+        j21 = vrs.jn_dF_dpsi(djn_dpsi1, djn_dpsi2, dR_dpsi, w, self.q, m)
+        j22 = vrs.jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin,
+                              w, self.q, m)
+        j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
         j21[1, ixa[1:-1]] += self.q * dRst_dpsi
         j22[1, ixa[1:-1]] += self.q * dRst_dphin
         j23[ixa[1:-1]] += self.q * dRst_dphip
@@ -1170,9 +1125,10 @@ class LaserDiode1D(object):
         j24[ixa[1:-1]] = self.q * dRst_dS
 
         # 3. Hole current continuity equation
-        j31, j32, j33 = self._jp_cont_jac(djp_dpsi1, djp_dpsi2,
-                                          djp_dphip1, djp_dphip2,
-                                          dR_dpsi, dR_dphin, dR_dphip, w)
+        j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, self.q, m)
+        j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
+        j33 = vrs.jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip,
+                              w, self.q, m)
         j31[1, ixa[1:-1]] -= self.q * dRst_dpsi
         j32[ixa[1:-1]] -= self.q * dRst_dphin
         j33[1, ixa[1:-1]] -= self.q * dRst_dphip
@@ -1205,7 +1161,7 @@ class LaserDiode1D(object):
         # rightmost column -- derivatives w.r.t. S
         J[m:2*m, -1] = j24
         J[2*m:3*m, -1] = j34
-        # bottom row -- photon density RE
+        # bottom row -- photon density rate equation
         J[-1, :m][ixa[1:-1]] = (self.beta_sp * dRrad_dpsi[ixa[1:-1]]
                                 * w_ar * T
                                 + self.vg * gain_dpsi * w_ar * T * S)
