@@ -8,7 +8,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import solve_banded
 from scipy import sparse
-from slice_1d import Slice
+from design_1d import Design1D
 import constants as const
 import units
 import carrier_concentrations as cc
@@ -37,14 +37,15 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
 
 class LaserDiode1D(object):
 
-    def __init__(self, slc, ar_inds, L, w, R1, R2, lam, ng, alpha_i, beta_sp):
+    def __init__(self, design, ar_inds, L, w, R1, R2,
+                 lam, ng, alpha_i, beta_sp):
         """
         Class for storing all the model parameters of a 1D laser diode.
 
         Parameters
         ----------
-        slc : slice_1d.Slice
-            A `Slice` object with all necessary physical parameters.
+        design : design_1d.Design1D
+            A `Design_1D` object with all necessary physical parameters.
         ar_inds : number or list of numbers
             Indices of active region layers in `slc`.
         L : number
@@ -69,7 +70,7 @@ class LaserDiode1D(object):
         """
         # checking if all the necessary parameters were specified
         # and if active region indices correspond to actual layers
-        assert isinstance(slc, Slice)
+        assert isinstance(design, Design1D)
         inds = list()
         for ind, layer in slc.layers.items():
             inds.append(ind)
@@ -77,7 +78,7 @@ class LaserDiode1D(object):
         if isinstance(ar_inds, int):
             self.ar_inds = [ar_inds]
         assert all([ar_ind in inds for ar_ind in self.ar_inds])
-        self.slc = slc
+        self.design = design
 
         # constants
         self.Vt = const.kb*const.T
@@ -116,7 +117,7 @@ class LaserDiode1D(object):
         Generate a uniform mesh with a specified `step`. Should result with at
         least 50 nodes, otherwise raises an exception.
         """
-        d = self.slc.get_thickness()
+        d = self.design.get_thickness()
         if d/step < 50:
             raise Exception("Mesh step (%f) is too large." % step)
         self.xin = np.arange(0, d, step)
@@ -217,14 +218,19 @@ class LaserDiode1D(object):
         # calculating values
         dtype = np.dtype('float64')
         if p in inp_params:
-            y = np.array([self.slc.get_value(p, xi) for xi in x], dtype=dtype)
+            y = np.array([self.design.get_value(p, xi) for xi in x],
+                         dtype=dtype)
         elif p=='Eg':
-            Ec = np.array([self.slc.get_value('Ec', xi) for xi in x], dtype=dtype)
-            Ev = np.array([self.slc.get_value('Ev', xi) for xi in x], dtype=dtype)
+            Ec = np.array([self.design.get_value('Ec', xi) for xi in x],
+                          dtype=dtype)
+            Ev = np.array([self.design.get_value('Ev', xi) for xi in x],
+                          dtype=dtype)
             y = Ec-Ev
         elif p=='C_dop':
-            Nd = np.array([self.slc.get_value('Nd', xi) for xi in x], dtype=dtype)
-            Na = np.array([self.slc.get_value('Na', xi) for xi in x], dtype=dtype)
+            Nd = np.array([self.design.get_value('Nd', xi) for xi in x],
+                          dtype=dtype)
+            Na = np.array([self.design.get_value('Na', xi) for xi in x],
+                          dtype=dtype)
             y = Nd-Na
         else:
             raise Exception('Error: unknown parameter %s' % p)
@@ -238,7 +244,7 @@ class LaserDiode1D(object):
             self.calculate_param(p, 'b')
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
-        inds = np.array([self.slc.get_index(xi) for xi in self.xin])
+        inds = np.array([self.design.get_index(xi) for xi in self.xin])
         self.ar_ix = np.zeros(self.xin.shape, dtype=bool)
         for ind in self.ar_inds:
             self.ar_ix |= (inds == ind)
@@ -456,15 +462,15 @@ class LaserDiode1D(object):
 
         """
         # generating refractive index profile
-        x = np.arange(0, self.slc.get_thickness(), step)
-        n = np.array([self.slc.get_value('n_refr', xi) for xi in x])
-        inds = np.array([self.slc.get_index(xi) for xi in x], dtype=int)
+        x = np.arange(0, self.design.get_thickness(), step)
+        n = np.array([self.design.get_value('n_refr', xi) for xi in x])
+        inds = np.array([self.design.get_index(xi) for xi in x], dtype=int)
 
         # removing boundary layers (if needed)
         i1, i2 = remove_layers
-        to_remove = self.slc.inds[:i1]
+        to_remove = self.design.inds[:i1]
         if i2 > 0:
-            to_remove += self.slc.inds[-i2:]
+            to_remove += self.design.inds[-i2:]
         ix = np.array([True]*len(inds))
         for layer_index in to_remove:
             ix = np.logical_and(ix, inds!=layer_index)

@@ -186,7 +186,7 @@ class Layer(object):
         y = pv.get_value(x)
         return y
 
-class Slice(object):
+class Design1D(object):
 
     def __init__(self):
         """
@@ -351,10 +351,10 @@ def test_layer_cf():
     success = (not s) and ('foo' in m) and (len(m)==1)
     assert success
 
-def test_slice():
+def test_design1d():
     """
     Testing if doping profile is correctly evaluated in
-    a two-layer slice.
+    a two-layer `Design1D` object.
     """
     # creating layers
     l1 = Layer('n', 1e-4)
@@ -365,7 +365,7 @@ def test_slice():
     l2.set_parameter('Na', 9e17)
 
     # assembling slice
-    d = Slice()
+    d = Design1D()
     d.add_layer(l2, 1)
     d.add_layer(l1, 0)
 
@@ -379,7 +379,7 @@ def test_slice():
     success = (err<1e-6).all()
     assert success
 
-def test_slice_thickness():
+def test_design1d_thickness():
     """
     Testing the Slice.get_thickness() method.
     """
@@ -392,7 +392,7 @@ def test_slice_thickness():
     l2.set_parameter('Ec', 1.6)
 
     # assembling device and calculating for both cases
-    d = Slice()
+    d = Design1D()
     d.add_layer(l1)
     d.add_layer(l2)
     x1 = d.get_thickness()
