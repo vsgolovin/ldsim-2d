@@ -512,6 +512,15 @@ class LaserDiode1D(object):
         else:
             self.yin['wg_mode'] = self.wgm_fun(self.xin)
 
+    def _calculate_fca(self):
+        "Calculate free-carrier absorption."
+        T = self.yin['wg_mode'][1:-1]
+        w = self.xbn[1:] - self.xbn[:-1]
+        n = self.sol['n'][1:-1]
+        p = self.sol['p'][1:-1]
+        arr = T*w*(n*self.fca_e + p*self.fca_h)
+        return np.sum(arr)
+
     def transport_init(self, voltage, psi_init=None, phi_n_init=None,
                        phi_p_init=None):
         "Initialize diode drift-diffusion problem."
@@ -699,7 +708,7 @@ class LaserDiode1D(object):
 
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
 
-    def _transport_system(self, discr='mSG'):
+    def _transport_system(self, discr='mSG', laser=True):
         """
         Calculate Jacobian and residual for the transport problem.
 
@@ -707,216 +716,15 @@ class LaserDiode1D(object):
         ----------
         discr : str
             Current density discretiztion scheme.
+        laser : bool
+            Whether to add stimulated emission to the drift-diffusion system.
 
         Returns
         -------
         J : scipy.sparse.cscmatrix
             Transport system Jacobian.
-            Shape is `(self.npoints - 2, self.npoints - 2)`.
         r : numpy.ndarray
-            Residual vector with length `self.npoints - 2`.
-
-        """
-        # mesh parameters
-        m = self.npoints - 2  # number of inner nodes
-                              # used in comments to show array shape
-        h = self.xin[1:] - self.xin[:-1]  # mesh steps (m+1)
-        w = self.xbn[1:] - self.xbn[:-1]  # volumes (m)
-
-        # potentials, carrier densities and their derivatives at nodes
-        psi = self.sol['psi']
-        phi_n = self.sol['phi_n']
-        phi_p = self.sol['phi_p']
-        n = self.sol['n']
-        p = self.sol['p']
-        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
-                             self.yin['Ec'], self.Vt)
-        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
-                               self.yin['Ec'], self.Vt)
-        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'],
-                             self.yin['Ev'], self.Vt)
-        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
-                               self.yin['Ev'], self.Vt)
-
-        # Bernoulli function for current density calculation (m+1)
-        B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)
-        B_minus = flux.bernoulli(-(psi[1:]-psi[:-1])/self.Vt)
-        Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)
-        Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
-
-        # calculating current densities and their derivatives
-        if discr == 'SG':  # Scharfetter-Gummel discretization
-            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
-                self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
-            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
-                self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
-
-        elif discr == 'mSG':  # modified SG discretization
-            jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
-                self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
-            jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
-                self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
-
-        else:
-            raise Exception('Error: unknown current density '
-                            + 'discretization scheme %s.' % discr)
-
-        # store calculated current density
-        self.sol['J'] = (jn + jp).mean()
-
-        # recombination rates (m)
-        n0 = self.yin['n0'][1:-1]
-        p0 = self.yin['p0'][1:-1]
-        tau_n = self.yin['tau_n'][1:-1]
-        tau_p = self.yin['tau_p'][1:-1]
-        B_rad = self.yin['B'][1:-1]
-        Cn = self.yin['Cn'][1:-1]
-        Cp = self.yin['Cp'][1:-1]
-        R_srh = rec.srh_R(n[1:-1], p[1:-1], n0, p0, tau_n, tau_p)
-        R_rad = rec.rad_R(n[1:-1], p[1:-1], n0, p0, B_rad)
-        R_aug = rec.auger_R(n[1:-1], p[1:-1], n0, p0, Cn, Cp)
-        R = (R_srh + R_rad + R_aug)
-
-        # recombination rates' derivatives
-        dR_dpsi = (rec.srh_Rdot(n[1:-1], dn_dpsi[1:-1],
-                                p[1:-1], dp_dpsi[1:-1],
-                                n0, p0, tau_n, tau_p)
-                  +rec.rad_Rdot(n[1:-1], dn_dpsi[1:-1],
-                                p[1:-1], dp_dpsi[1:-1],
-                                n0, p0, B_rad)
-                  +rec.auger_Rdot(n[1:-1], dn_dpsi[1:-1],
-                                  p[1:-1], dp_dpsi[1:-1],
-                                  n0, p0, Cn, Cp))
-        dR_dphin = (rec.srh_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
-                                 n0, p0, tau_n, tau_p)
-                   +rec.rad_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
-                                 n0, p0, B_rad)
-                   +rec.auger_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
-                                   n0, p0, Cn, Cp))
-        dR_dphip = (rec.srh_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
-                                 n0, p0, tau_n, tau_p)
-                   +rec.rad_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
-                                 n0, p0, B_rad)
-                   +rec.auger_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
-                                   n0, p0, Cn, Cp))
-
-        # calculating residual of the system (m*3)
-        rvec = np.zeros(m*3)
-        rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
-                                   self.eps_0, self.q, self.yin['C_dop'])
-        rvec[m:2*m] =  self.q*R*w - (jn[1:]-jn[:-1])
-        rvec[2*m:]  = -self.q*R*w - (jp[1:]-jp[:-1])
-
-        # calculating Jacobian (m*3, m*3)
-        # 1. Poisson's equation
-        j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w, self.yin['eps'],
-                                  self.eps_0, self.q)
-        j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
-        j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
-
-        # 2. Electron current continuity equation
-        j21 = vrs.jn_dF_dpsi(djn_dpsi1, djn_dpsi2, dR_dpsi, w, self.q, m)
-        j22 = vrs.jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin,
-                              w, self.q, m)
-        j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
-
-        # 3. Hole current continuity equation
-        j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, self.q, m)
-        j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
-        j33 = vrs.jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip,
-                              w, self.q, m)
-
-        # collect Jacobian diagonals
-        data = np.zeros((11, 3*m))
-        data[0, 2*m:   ] = j13
-        data[1,   m:2*m] = j12
-        data[1, 2*m:   ] = j23
-        data[2,    :m  ] = j11[0]
-        data[2,   m:2*m] = j22[0]
-        data[2, 2*m:   ] = j33[0]
-        data[3,    :m  ] = j11[1]
-        data[3,   m:2*m] = j22[1]
-        data[3, 2*m:   ] = j33[1]
-        data[4,    :m  ] = j11[2]
-        data[4,   m:2*m] = j22[2]
-        data[4, 2*m:   ] = j33[2]
-        data[5,    :m  ] = j21[0]
-        data[6,    :m  ] = j21[1]
-        data[6,   m:2*m] = j32
-        data[7,    :m  ] = j21[2]
-        data[8,    :m  ] = j31[0]
-        data[9,    :m  ] = j31[1]
-        data[10,   :m  ] = j31[2]
-
-        # assemble sparse matrix
-        diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
-        J = sparse.spdiags(data=data, diags=diags, m=3*m, n=3*m, format='csc')
-
-        return J, rvec
-
-    def transport_step(self, omega=1.0, discr='mSG'):
-        """
-        Perform a single Newton step for the transport problem.
-
-        Parameters
-        ----------
-        omega : float
-            Damping parameter (`x += dx*omega`).
-        discr : str
-            Current density discretiztion scheme.
-
-        """
-        J, rvec = self._transport_system(discr)
-        dx = sparse.linalg.spsolve(J, -rvec)
-
-        # calculating and saving fluctuation
-        x = np.hstack((self.sol['psi'][1:-1],
-                       self.sol['phi_n'][1:-1],
-                       self.sol['phi_p'][1:-1]))
-        fluct = newton.l2_norm(dx) / newton.l2_norm(x)
-        self.fluct.append(fluct)
-
-        # updating current solution (potentials and densities)
-        m = self.npoints - 2
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
-        self._update_densities()
-        return fluct
-
-    def _calculate_fca(self):
-        "Calculate free-carrier absorption."
-        T = self.yin['wg_mode'][1:-1]
-        w = self.xbn[1:] - self.xbn[:-1]
-        n = self.sol['n'][1:-1]
-        p = self.sol['p'][1:-1]
-        arr = T*w*(n*self.fca_e + p*self.fca_h)
-        return np.sum(arr)
-
-    def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
-                    phi_p_init=None, S_init=None):
-        "Initialize laser diode drift-diffusion problem."
-        self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
-        if S_init is not None:
-            assert isinstance(S_init, (float, int))
-            self.sol['S'] = S_init
-
-    def _lasing_system(self, discr='mSG'):
-        """
-        Calculate Jacobian and residual for the lasing problem.
-
-        Parameters
-        ----------
-        discr : str
-            Current density discretiztion scheme.
-
-        Returns
-        -------
-        J : scipy.sparse.cscmatrix
-            Lasing system Jacobian.
-            Shape is `(self.npoints - 2, self.npoints - 2)`.
-        r : numpy.ndarray
-            Residual vector with length `self.npoints - 2`.
+            Residual vector.
 
         """
         # mesh parameters
@@ -1005,56 +813,60 @@ class LaserDiode1D(object):
                                      n0, p0, Cn, Cp)
         dR_dphip = dRsrh_dphip + dRrad_dphip + dRaug_dphip
 
-        # stimulated emission
-        ixa = self.ar_ix
-        ixn = (n[ixa] < p[ixa])
-        N = np.zeros_like(n[ixa])
-        N[ixn] = n[ixa][ixn]
-        N[~ixn] = p[ixa][~ixn]
-        g0 = self.yin['g0'][ixa]
-        N_tr = self.yin['N_tr'][ixa]
-        gain = g0 * np.log(N/N_tr)
-        ind_abs = np.where(gain < 0)
-        gain[ind_abs] = 0.0  # no absoption
+        if laser:
+            ixa = self.ar_ix
+            ixn = (n[ixa] < p[ixa])
+            N = np.zeros_like(n[ixa])
+            N[ixn] = n[ixa][ixn]
+            N[~ixn] = p[ixa][~ixn]
+            g0 = self.yin['g0'][ixa]
+            N_tr = self.yin['N_tr'][ixa]
+            gain = g0 * np.log(N/N_tr)
+            ind_abs = np.where(gain < 0)
+            gain[ind_abs] = 0.0  # no absoption
 
-        # gain derivatives
-        gain_dpsi = np.zeros_like(gain)
-        gain_dpsi[ixn] = g0[ixn] * dn_dpsi[ixa][ixn] / n[ixa][ixn]
-        gain_dpsi[~ixn] = g0[~ixn] * dp_dpsi[ixa][~ixn] / p[ixa][~ixn]
-        gain_dphin = np.zeros_like(gain)
-        gain_dphin[ixn] = g0[ixn] * dn_dphin[ixa][ixn] / n[ixa][ixn]
-        gain_dphip = np.zeros_like(gain)
-        gain_dphip[~ixn] = g0[~ixn] * dp_dphip[ixa][~ixn] / p[ixa][~ixn]
-        for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
-            gdot[ind_abs] = 0  # ignore absoption
+            # gain derivatives
+            gain_dpsi = np.zeros_like(gain)
+            gain_dpsi[ixn] = g0[ixn] * dn_dpsi[ixa][ixn] / n[ixa][ixn]
+            gain_dpsi[~ixn] = g0[~ixn] * dp_dpsi[ixa][~ixn] / p[ixa][~ixn]
+            gain_dphin = np.zeros_like(gain)
+            gain_dphin[ixn] = g0[ixn] * dn_dphin[ixa][ixn] / n[ixa][ixn]
+            gain_dphip = np.zeros_like(gain)
+            gain_dphip[~ixn] = g0[~ixn] * dp_dphip[ixa][~ixn] / p[ixa][~ixn]
+            for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
+                gdot[ind_abs] = 0  # ignore absoption
 
-        # total gain and loss
-        T = self.yin['wg_mode'][ixa]
-        w_ar = w[ixa[1:-1]]
-        alpha_fca = self._calculate_fca()
-        alpha = self.alpha_i + self.alpha_m + alpha_fca
-        total_gain = np.sum(gain * w_ar * T) - alpha
+            # total gain and loss
+            T = self.yin['wg_mode'][ixa]
+            w_ar = w[ixa[1:-1]]
+            alpha_fca = self._calculate_fca()
+            alpha = self.alpha_i + self.alpha_m + alpha_fca
+            total_gain = np.sum(gain * w_ar * T) - alpha
 
-        # stimulated recombination rate
-        S = self.sol['S']
-        R_st = self.vg * gain * w_ar * T * S
-        dRst_dS = self.vg * gain * w_ar * T
-        dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S
-        dRst_dphin = self.vg * gain_dphin * w_ar * T * S
-        dRst_dphip = self.vg * gain_dphip * w_ar * T * S
+            # stimulated recombination rate
+            S = self.sol['S']
+            R_st = self.vg * gain * w_ar * T * S
+            dRst_dS = self.vg * gain * w_ar * T
+            dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S
+            dRst_dphin = self.vg * gain_dphin * w_ar * T * S
+            dRst_dphip = self.vg * gain_dphip * w_ar * T * S
 
-        # residual of the system (m*3 + 1)
-        rvec = np.zeros(m*3 + 1)
+        # residual of the system
+        if laser:
+            rvec = np.zeros(m*3 + 1)
+        else:
+            rvec = np.zeros(m*3)
         rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
                                    self.eps_0, self.q, self.yin['C_dop'])
         rvec[m:2*m] =  self.q*R*w - (jn[1:]-jn[:-1])
-        rvec[m:2*m][ixa[1:-1]] += self.q*R_st
         rvec[2*m:3*m]  = -self.q*R*w - (jp[1:]-jp[:-1])
-        rvec[2*m:3*m][ixa[1:-1]] -= self.q*R_st
-        rvec[-1] = (self.beta_sp*np.sum(R_rad[ixa[1:-1]]*w_ar*T)
-                    + self.vg*total_gain*S)
+        if laser:
+            rvec[m:2*m][ixa[1:-1]] += self.q*R_st
+            rvec[2*m:3*m][ixa[1:-1]] -= self.q*R_st
+            rvec[-1] = (self.beta_sp*np.sum(R_rad[ixa[1:-1]]*w_ar*T)
+                        + self.vg*total_gain*S)
 
-        # calculating Jacobian (m*3 + 1, m*3 + 1)
+        # Jacobian
         # 1. Poisson's equation
         j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w, self.yin['eps'],
                                   self.eps_0, self.q)
@@ -1066,22 +878,24 @@ class LaserDiode1D(object):
         j22 = vrs.jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin,
                               w, self.q, m)
         j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
-        j21[1, ixa[1:-1]] += self.q * dRst_dpsi
-        j22[1, ixa[1:-1]] += self.q * dRst_dphin
-        j23[ixa[1:-1]] += self.q * dRst_dphip
-        j24 = np.zeros(m)
-        j24[ixa[1:-1]] = self.q * dRst_dS
+        if laser:
+            j21[1, ixa[1:-1]] += self.q * dRst_dpsi
+            j22[1, ixa[1:-1]] += self.q * dRst_dphin
+            j23[ixa[1:-1]] += self.q * dRst_dphip
+            j24 = np.zeros(m)
+            j24[ixa[1:-1]] = self.q * dRst_dS
 
         # 3. Hole current continuity equation
         j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, self.q, m)
         j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
         j33 = vrs.jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip,
                               w, self.q, m)
-        j31[1, ixa[1:-1]] -= self.q * dRst_dpsi
-        j32[ixa[1:-1]] -= self.q * dRst_dphin
-        j33[1, ixa[1:-1]] -= self.q * dRst_dphip
-        j34 = np.zeros(m)
-        j34[ixa[1:-1]] = -self.q * dRst_dS
+        if laser:
+            j31[1, ixa[1:-1]] -= self.q * dRst_dpsi
+            j32[ixa[1:-1]] -= self.q * dRst_dphin
+            j33[1, ixa[1:-1]] -= self.q * dRst_dphip
+            j34 = np.zeros(m)
+            j34[ixa[1:-1]] = -self.q * dRst_dS
 
         # collect Jacobian diagonals
         data = np.zeros((11, 3*m))
@@ -1107,27 +921,66 @@ class LaserDiode1D(object):
 
         # assemble sparse matrix
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
-        J = sparse.spdiags(data=data, diags=diags, m=3*m+1, n=3*m+1, format='lil')
-
-        # rightmost column -- derivatives w.r.t. S
-        J[m:2*m, -1] = j24
-        J[2*m:3*m, -1] = j34
-        # bottom row -- photon density RE
-        inds = np.where(ixa[1:-1])[0]
-        J[-1, inds] = (self.beta_sp * dRrad_dpsi[ixa[1:-1]]
-                                * w_ar * T
-                                + self.vg * gain_dpsi * w_ar * T * S)
-        J[-1, inds+m] = (self.beta_sp * dRrad_dphin[ixa[1:-1]]
-                                   * w_ar * T
-                                   + self.vg * gain_dphin * w_ar * T * S)
-        J[-1, inds+2*m] = (self.beta_sp * dR_dphip[ixa[1:-1]]
-                                     * w_ar * T * S
-                                     + self.vg * gain_dphip * w_ar * T * S)
-        J[-1, -1] = self.vg * total_gain
- 
-        J = J.tocsc()
+        if not laser:
+            J = sparse.spdiags(data=data, diags=diags, m=3*m, n=3*m, format='csc')
+        else:
+            J = sparse.spdiags(data=data, diags=diags, m=3*m+1, n=3*m+1, format='lil')
+            # rightmost column -- derivatives w.r.t. S
+            J[m:2*m, -1] = j24
+            J[2*m:3*m, -1] = j34
+            # bottom row -- photon density RE
+            inds = np.where(ixa[1:-1])[0]
+            J[-1, inds] = (self.beta_sp * dRrad_dpsi[ixa[1:-1]]
+                                    * w_ar * T
+                                    + self.vg * gain_dpsi * w_ar * T * S)
+            J[-1, inds+m] = (self.beta_sp * dRrad_dphin[ixa[1:-1]]
+                                    * w_ar * T
+                                    + self.vg * gain_dphin * w_ar * T * S)
+            J[-1, inds+2*m] = (self.beta_sp * dR_dphip[ixa[1:-1]]
+                                        * w_ar * T * S
+                                        + self.vg * gain_dphip * w_ar * T * S)
+            J[-1, -1] = self.vg * total_gain
+            J = J.tocsc()  # for `sparse.linalg.spsolve`
 
         return J, rvec
+
+    def transport_step(self, omega=1.0, discr='mSG'):
+        """
+        Perform a single Newton step for the transport problem.
+
+        Parameters
+        ----------
+        omega : float
+            Damping parameter (`x += dx*omega`).
+        discr : str
+            Current density discretiztion scheme.
+
+        """
+        J, rvec = self._transport_system(discr, laser=False)
+        dx = sparse.linalg.spsolve(J, -rvec)
+
+        # calculating and saving fluctuation
+        x = np.hstack((self.sol['psi'][1:-1],
+                       self.sol['phi_n'][1:-1],
+                       self.sol['phi_p'][1:-1]))
+        fluct = newton.l2_norm(dx) / newton.l2_norm(x)
+        self.fluct.append(fluct)
+
+        # updating current solution (potentials and densities)
+        m = self.npoints - 2
+        self.sol['psi'][1:-1] += dx[:m] * omega
+        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+        self._update_densities()
+        return fluct
+
+    def lasing_init(self, voltage, psi_init=None, phi_n_init=None,
+                    phi_p_init=None, S_init=None):
+        "Initialize laser diode drift-diffusion problem."
+        self.transport_init(voltage, psi_init, phi_n_init, phi_p_init)
+        if S_init is not None:
+            assert isinstance(S_init, (float, int))
+            self.sol['S'] = S_init
 
     def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
         """
@@ -1145,7 +998,7 @@ class LaserDiode1D(object):
 
         """
         # residual vector and Jacobian for transport problem
-        J, rvec = self._lasing_system(discr)
+        J, rvec = self._transport_system(discr, laser=True)
 
         # solve the system
         dx = sparse.linalg.spsolve(J, -rvec)
@@ -1156,7 +1009,7 @@ class LaserDiode1D(object):
         fluct = newton.l2_norm(dx) / newton.l2_norm(x)
         self.fluct.append(fluct)
         self.iterations += 1
- 
+
         # update solution
         m = self.npoints - 2
         self.sol['psi'][1:-1] += dx[:m]*omega
@@ -1167,7 +1020,7 @@ class LaserDiode1D(object):
         self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
                              self.yin['Nv'], self.yin['Ev'], self.Vt)
         if dx[-1] > 0:
-            self.sol['S'] += dx[-1] * omega_S[0] 
+            self.sol['S'] += dx[-1] * omega_S[0]
         else:
             self.sol['S'] += dx[-1] * omega_S[1]
 

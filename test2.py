@@ -2,7 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sample_slice import sl
+from sample_design import sd
 from ld_1d import LaserDiode1D
 import units
 import constants as const
@@ -10,7 +10,7 @@ import constants as const
 plt.rc('lines', linewidth=0.7)
 plt.rc('figure.subplot', left=0.15, right=0.85)
 
-ld = LaserDiode1D(slc=sl, ar_inds=3,
+ld = LaserDiode1D(design=sd, ar_inds=3,
                   L=3000e-4, w=100e-4,
                   R1=0.95, R2=0.05,
                   lam=0.87e-4, ng=3.9,
@@ -20,14 +20,14 @@ ld.solve_waveguide(remove_layers=[1,1])
 ld.make_dimensionless()
 ld.solve_equilibrium()
 
-voltages = np.arange(0, 2.51, 0.05)
+voltages = np.arange(0, 2.51, 0.1)
 j_values = np.zeros_like(voltages)
 s_values = np.zeros_like(voltages)
 for i, v in enumerate(voltages):
     print('%.2f'%v, end=', ')
     ld.transport_init(v)
     fluct = 1
-    while fluct>1e-7:
+    while fluct>1e-8:
         fluct = ld.lasing_step(0.1, (1.0, 0.1), 'mSG')
     j_values[i] = -ld.sol['J']
     s_values[i] = ld.sol['S']
