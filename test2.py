@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from sample_design import sd
 from ld_1d import LaserDiode1D
 import units
-import constants as const
 
 plt.rc('lines', linewidth=0.7)
 plt.rc('figure.subplot', left=0.15, right=0.85)
@@ -22,22 +21,23 @@ ld.solve_equilibrium()
 
 voltages = np.arange(0, 2.51, 0.1)
 j_values = np.zeros_like(voltages)
-s_values = np.zeros_like(voltages)
+I_values = np.zeros_like(voltages)
+P_values = np.zeros_like(voltages)
 for i, v in enumerate(voltages):
     print('%.2f'%v, end=', ')
-    ld.transport_init(v)
+    ld.lasing_init(v)
     fluct = 1
     while fluct>1e-8:
         fluct = ld.lasing_step(0.1, (1.0, 0.1), 'mSG')
     j_values[i] = -ld.sol['J']
-    s_values[i] = ld.sol['S']
+    I_values[i] = ld.sol['I']
+    P_values[i] = ld.sol['P']
     print('%d, %.3e' % (ld.iterations, ld.sol['S']))
 
 ld.original_units()
-s_values *= units.n*units.x
 j_values *= units.j
-I_values = j_values * ld.w * ld.L
-P_values = s_values*ld.w*ld.L * ld.vg*ld.alpha_m * const.h*const.c/ld.lam
+I_values *= units.j * units.x**2
+P_values *= units.E / units.t
 x = ld.xin * 1e4
 
 plt.figure('Band diagram')

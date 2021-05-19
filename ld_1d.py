@@ -31,8 +31,9 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'eps':1, 'n_refr':1, 'ni':units.n, 'wg_mode':1/units.x,
                'n0':units.n, 'p0':units.n, 'psi_lcn':units.V, 'psi_bi':units.V,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
-               'n':units.n, 'p':units.n,
-               'g0':1/units.x, 'N_tr':units.n, 'S':units.n, 'J':units.j}
+               'n':units.n, 'p':units.n, 'g0':1/units.x, 'N_tr':units.n,
+               'S':units.n*units.x, 'J':units.j, 'I':units.j*units.x**2,
+               'P':units.E/units.t}
 
 
 class LaserDiode1D(object):
@@ -108,6 +109,8 @@ class LaserDiode1D(object):
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
         self.sol['S'] = 1e-12  # essentially 0
+        self.sol['J'] = np.NaN
+        self.sol['I'] = np.NaN
 
         self.gen_uniform_mesh()
         self.is_dimensionless = False
@@ -264,10 +267,11 @@ class LaserDiode1D(object):
         # device parameters
         self.L /= units.x
         self.w /= units.x
-        self.vg /= units.x/units.t
         self.alpha_m /= 1/units.x
+        self.lam /= units.x
+        self.photon_energy /= units.E
+        self.vg /= units.x/units.t
         self.alpha_i /= 1/units.x
-        # no need to convert other parameters (?)
 
         # mesh
         self.xin /= units.x
@@ -298,10 +302,11 @@ class LaserDiode1D(object):
         # device parameters
         self.L *= units.x
         self.w *= units.x
-        self.vg *= units.x/units.t
         self.alpha_m *= 1/units.x
+        self.lam *= units.x
+        self.photon_energy *= units.E
+        self.vg *= units.x/units.t
         self.alpha_i *= 1/units.x
-        # no need to convert other parameters (?)
 
         # mesh
         self.xin *= units.x
@@ -433,15 +438,6 @@ class LaserDiode1D(object):
         self.sol['phi_p'] = np.zeros_like(sol.x)
         self._update_densities()
 
-    def _update_densities(self):
-        """
-        Update electron and hole densities using currently stored potentials.
-        """
-        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
-                             self.yin['Nc'], self.yin['Ec'], self.Vt)
-        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
-                             self.yin['Nv'], self.yin['Ev'], self.Vt)
-
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
         """
         Calculate vertical mode profile. Finds `n_modes` solutions of the
@@ -511,6 +507,15 @@ class LaserDiode1D(object):
             self.yin['wg_mode'] = self.wgm_fun_dls(self.xin)
         else:
             self.yin['wg_mode'] = self.wgm_fun(self.xin)
+
+    def _update_densities(self):
+        """
+        Update electron and hole densities using currently stored potentials.
+        """
+        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
+                             self.yin['Nc'], self.yin['Ec'], self.Vt)
+        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
+                             self.yin['Nv'], self.yin['Ev'], self.Vt)
 
     def _calculate_fca(self):
         "Calculate free-carrier absorption."
@@ -708,7 +713,7 @@ class LaserDiode1D(object):
 
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
 
-    def _transport_system(self, discr='mSG', laser=True):
+    def _transport_system(self, discr='mSG', laser=True, save_J=True):
         """
         Calculate Jacobian and residual for the transport problem.
 
@@ -718,6 +723,8 @@ class LaserDiode1D(object):
             Current density discretiztion scheme.
         laser : bool
             Whether to add stimulated emission to the drift-diffusion system.
+        save_J : bool
+            Whether to save calculated current density to `self.sol`.
 
         Returns
         -------
@@ -771,8 +778,9 @@ class LaserDiode1D(object):
             raise Exception('Error: unknown current density '
                             + 'discretization scheme %s.' % discr)
 
-        # store calculated current density
-        self.sol['J'] = (jn + jp).mean()
+        if save_J:  # store calculated current density
+            self.sol['J'] = (jn + jp).mean()
+            self.sol['I'] = self.sol['J'] * self.L * self.w
 
         # spontaneous recombination rates (m)
         n0 = self.yin['n0'][1:-1]
@@ -882,8 +890,8 @@ class LaserDiode1D(object):
             j21[1, ixa[1:-1]] += self.q * dRst_dpsi
             j22[1, ixa[1:-1]] += self.q * dRst_dphin
             j23[ixa[1:-1]] += self.q * dRst_dphip
-            j24 = np.zeros(m)
-            j24[ixa[1:-1]] = self.q * dRst_dS
+            j24 = np.zeros((m, 1))
+            j24[ixa[1:-1], 0] = self.q * dRst_dS
 
         # 3. Hole current continuity equation
         j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, self.q, m)
@@ -894,8 +902,8 @@ class LaserDiode1D(object):
             j31[1, ixa[1:-1]] -= self.q * dRst_dpsi
             j32[ixa[1:-1]] -= self.q * dRst_dphin
             j33[1, ixa[1:-1]] -= self.q * dRst_dphip
-            j34 = np.zeros(m)
-            j34[ixa[1:-1]] = -self.q * dRst_dS
+            j34 = np.zeros((m, 1))
+            j34[ixa[1:-1], 0] = -self.q * dRst_dS
 
         # collect Jacobian diagonals
         data = np.zeros((11, 3*m))
@@ -922,9 +930,11 @@ class LaserDiode1D(object):
         # assemble sparse matrix
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
         if not laser:
-            J = sparse.spdiags(data=data, diags=diags, m=3*m, n=3*m, format='csc')
+            J = sparse.spdiags(data=data, diags=diags,
+                               m=3*m, n=3*m, format='csc')
         else:
-            J = sparse.spdiags(data=data, diags=diags, m=3*m+1, n=3*m+1, format='lil')
+            J = sparse.spdiags(data=data, diags=diags,
+                               m=3*m+1, n=3*m+1, format='lil')
             # rightmost column -- derivatives w.r.t. S
             J[m:2*m, -1] = j24
             J[2*m:3*m, -1] = j34
@@ -1015,14 +1025,13 @@ class LaserDiode1D(object):
         self.sol['psi'][1:-1] += dx[:m]*omega
         self.sol['phi_n'][1:-1] += dx[m:2*m]*omega
         self.sol['phi_p'][1:-1] += dx[2*m:3*m]*omega
-        self.sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
-                             self.yin['Nc'], self.yin['Ec'], self.Vt)
-        self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
-                             self.yin['Nv'], self.yin['Ev'], self.Vt)
+        self._update_densities()
         if dx[-1] > 0:
             self.sol['S'] += dx[-1] * omega_S[0]
         else:
             self.sol['S'] += dx[-1] * omega_S[1]
+        self.sol['P'] = (self.photon_energy * self.vg * self.alpha_m
+                         * self.sol['S'] * self.w * self.L)
 
         return fluct
 
