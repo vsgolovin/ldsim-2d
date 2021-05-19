@@ -480,7 +480,11 @@ class LaserDiode1D(object):
             ar_ix = np.logical_and(ar_ix, inds==layer_index)
 
         # solving the eigenvalue problem
-        n_eff_values, modes = waveguide.solve_wg(x, n, self.lam, n_modes)
+        if self.is_dimensionless:
+            lam = self.lam * units.x
+        else:
+            lam = self.lam
+        n_eff_values, modes = waveguide.solve_wg(x, n, lam, n_modes)
         # and picking one mode with the largest confinement factor (Gamma)
         gammas = np.zeros(n_modes)
         for i in range(n_modes):
