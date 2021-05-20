@@ -814,8 +814,7 @@ class LaserDiode1D(object):
                                   p[1:-1], dp_dpsi[1:-1],
                                   n0, p0, tau_n, tau_p)
         dRrad_dpsi = rec.rad_Rdot(n[1:-1], dn_dpsi[1:-1],
-                                  p[1:-1], dp_dpsi[1:-1],
-                                  n0, p0, B_rad)
+                                  p[1:-1], dp_dpsi[1:-1], B_rad)
         dRaug_dpsi = rec.auger_Rdot(n[1:-1], dn_dpsi[1:-1],
                                     p[1:-1], dp_dpsi[1:-1],
                                     n0, p0, Cn, Cp)
@@ -823,14 +822,14 @@ class LaserDiode1D(object):
         dRsrh_dphin = rec.srh_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
                                    n0, p0, tau_n, tau_p)
         dRrad_dphin = rec.rad_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
-                                   n0, p0, B_rad)
+                                   B_rad)
         dRaug_dphin = rec.auger_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
                                      n0, p0, Cn, Cp)
         dR_dphin = dRsrh_dphin + dRrad_dphin + dRaug_dphin
         dRsrh_dphip = rec.srh_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
                                    n0, p0, tau_n, tau_p)
         dRrad_dphip = rec.rad_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
-                                   n0, p0, B_rad)
+                                   B_rad)
         dRaug_dphip = rec.auger_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
                                      n0, p0, Cn, Cp)
         dR_dphip = dRsrh_dphip + dRrad_dphip + dRaug_dphip

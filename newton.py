@@ -91,7 +91,7 @@ class NewtonSolver(object):
 if __name__=='__main__':
     # solving a simple nonlinear system
     import matplotlib.pyplot as plt
-     
+
     def residual(x):
          r = np.empty(2)
          r[0] = 2*x[0]**2 + 3*x[1] - 8
@@ -108,7 +108,7 @@ if __name__=='__main__':
 
     niter = 20  # number of iterations
     x_real = np.array([1, 2])  # actual solution
-    x0 = np.array([4, -1])  # initial guess 
+    x0 = np.array([4, -1])  # initial guess
     solutions = np.zeros((niter+1, 2), dtype=float)
     solutions[0, :] = x0
 

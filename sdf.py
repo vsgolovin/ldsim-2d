@@ -8,6 +8,7 @@ calculation.
 import numpy as np
 from fdint import fdk, dfdk
 
+
 def fermi_fdint(nu):
     """
     Fermi-Dirac integral of order 1/2 calculated using `fdint` package.
@@ -15,6 +16,7 @@ def fermi_fdint(nu):
     F = fdk(k=0.5, phi=nu)
     F *= 2/np.sqrt(np.pi)
     return F
+
 
 def fermi_dot_fdint(nu):
     """

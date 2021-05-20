@@ -33,7 +33,7 @@ def rad_R(n, p, n0, p0, B):
     R = B*(n*p-n0*p0)
     return R
 
-def rad_Rdot(n, ndot, p, pdot, n0, p0, B):
+def rad_Rdot(n, ndot, p, pdot, B):
     """
     Radiative recombination rate derivative with respect to electrostatic
     potential or one of quasi-Fermi potentials.
@@ -85,7 +85,7 @@ def test_derivatives():
     p = cc.p(psi, phi_p, Nv, Ev, Vt)
     pdot = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
     Rdot_srh = srh_Rdot(n, ndot, p, pdot, n0, p0, tau_n, tau_p)
-    Rdot_rad = rad_Rdot(n, ndot, p, pdot, n0, p0, B)
+    Rdot_rad = rad_Rdot(n, ndot, p, pdot, B)
     Rdot_aug = auger_Rdot(n, ndot, p, pdot, n0, p0, Cn, Cp)
 
     # 2. by using finite differences
@@ -112,7 +112,7 @@ def test_derivatives():
     R2 = auger_R(n2, p2, n0, p0, Cn, Cp)
     Rdot = (R2-R1)/(psi_2-psi_1)
     errs[2] = np.abs(1-Rdot_aug/Rdot)
-    
+
     # checking results
     print(errs)
     assert (errs<test_err).all()

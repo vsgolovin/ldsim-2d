@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Sep 23 19:26:14 2020
-
-@author: vsgolovin
+Physical constants.
 """
 
 T = 300                   # temperature (K)

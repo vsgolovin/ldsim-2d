@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Collection of tools for solving van Roosbroeck system.
+Collection of tools for solving van Roosbroeck (drift-diffusion) system.
 """
 
 import numpy as np

@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 28 18:28:32 2020
-
-@author: vsgolovin
+Functions for calculating free carrier densities and their derivatives.
 """
 
 import numpy as np
