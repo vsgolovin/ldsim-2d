@@ -4,6 +4,7 @@ Class for a 1-dimensional model of a laser diode.
 """
 
 import warnings
+import os
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import solve_banded
@@ -1038,6 +1039,77 @@ class LaserDiode1D(object):
                          * self.sol['S'] * self.w * self.L)
 
         return fluct
+
+    def export_results(self, folder=None, vp=2, delimiter=',', x_to_um=True):
+        """
+        Export current solution in the diagram form to a csv file
+        `#.##V.csv`, where `#.##` refers to the applied voltage.
+
+        Parameters
+        ----------
+        folder : str or None
+            Directory to save the file.
+        vp : int
+            Voltage precision, i.e. number of digits after `.`, to use in
+            the file name. The default is `2`.
+        delimiter : str
+            Column separator to use.
+        x_to_um : bool
+            Whether to convert `x` from centimeters to micrometers.
+
+        """
+        # pick directory for export
+        if folder is not None and isinstance(folder, str):
+            if not os.path.isdir(folder):
+                os.mkdir(folder)
+        else:
+            folder = ''
+
+        # make file name
+        voltage = self.sol['phi_n'][-1] - self.sol['phi_n'][0]
+        if self.is_dimensionless:
+            voltage *= units.V
+        assert isinstance(vp, int) and vp >= 0
+        s = '{:.' + str(vp) + 'f}'  # format string
+        fname = s.format(voltage) + 'V.csv'
+
+        # create arrays for export
+        x = self.xin.copy()
+        Ev = self.yin['Ev'] - self.sol['psi']
+        Ec = self.yin['Ec'] - self.sol['psi']
+        Fn = -self.sol['phi_n']
+        Fp = -self.sol['phi_p']
+        n = self.sol['n'].copy()
+        p = self.sol['p'].copy()
+
+        # convert dimensionless values
+        if self.is_dimensionless:
+            x *= units.x
+            Ev *= units.E
+            Ec *= units.E
+            Fn *= units.V  # units.E == units.V
+            Fp *= units.V
+            n *= units.n
+            p *= units.n
+
+        # convert x to micrometers
+        if x_to_um:
+            x *= 1e4
+
+        # write to file
+        with open(os.path.join(folder, fname), 'w') as f:
+            # header
+            assert isinstance(delimiter, str)
+            f.write(delimiter.join(('x', 'Ev', 'Ec',
+                                    'Fn', 'Fp', 'n', 'p')))
+
+            # values
+            for i in range(self.npoints):
+                f.write('\n')
+                vals = map('{:e}'.format, (x[i], Ev[i], Ec[i],
+                                           Fn[i], Fp[i], n[i], p[i]))
+                line = delimiter.join(vals)
+                f.write(line)
 
 
 if __name__ == '__main__':

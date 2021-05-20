@@ -10,6 +10,10 @@ from sample_design import sd
 from ld_1d import LaserDiode1D
 import units
 
+# export settings
+export = True
+export_folder = 'results'
+
 # set up the problem
 ld = LaserDiode1D(design=sd, ar_inds=3,
                   L=3000e-4, w=100e-4,
@@ -54,7 +58,8 @@ for i, v in enumerate(voltages):
     j_values[i] = -ld.sol['J'] * units.j                 # A/cm2
     I_values[i] = -ld.sol['I'] * (units.j * units.x**2)  # A
     P_values[i] = ld.sol['P'] * (units.E / units.t)      # W
-    print('  %6d   %.3e' % (ld.iterations, P_values[i]))
+    ld.export_results(folder='results', x_to_um=True)
+    print('  %5d    %.1e' % (ld.iterations, P_values[i]))
 
 ld.original_units()
 x = ld.xin * 1e4
@@ -101,3 +106,11 @@ plt.figure('P-I curve')
 plt.plot(I_values, P_values, 'b.-')
 plt.xlabel('$I$ (A)')
 plt.ylabel('$P$ (W)')
+
+# export V, J, I, P
+with open(export_folder + '/' + 'LIV.csv', 'w') as f:
+    f.write(','.join(('V', 'J', 'I', 'P')))
+    for i in range(len(voltages)):
+        f.write('\n')
+        vals = map(str, (voltages[i], j_values[i], I_values[i], P_values[i]))
+        f.write(','.join(vals))
