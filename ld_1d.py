@@ -34,7 +34,8 @@ unit_values = {'Ev':units.E, 'Ec':units.E, 'Eg':units.E, 'Nd':units.n,
                'psi':units.V, 'phi_n':units.V, 'phi_p':units.V,
                'n':units.n, 'p':units.n, 'g0':1/units.x, 'N_tr':units.n,
                'S':units.n*units.x, 'J':units.j, 'I':units.j*units.x**2,
-               'P':units.E/units.t}
+               'P':units.E/units.t, 'I_srh':units.j*units.x**2,
+               'I_rad':units.j*units.x**2, 'I_aug':units.j*units.x**2}
 
 
 class LaserDiode1D(object):
@@ -110,8 +111,6 @@ class LaserDiode1D(object):
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
         self.sol['S'] = 1e-12  # essentially 0
-        self.sol['J'] = np.NaN
-        self.sol['I'] = np.NaN
 
         self.gen_uniform_mesh()
         self.is_dimensionless = False
@@ -718,7 +717,7 @@ class LaserDiode1D(object):
 
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
 
-    def _transport_system(self, discr='mSG', laser=True, save_J=True):
+    def _transport_system(self, discr, laser, save_J, save_Isp):
         """
         Calculate Jacobian and residual for the transport problem.
 
@@ -730,6 +729,8 @@ class LaserDiode1D(object):
             Whether to add stimulated emission to the drift-diffusion system.
         save_J : bool
             Whether to save calculated current density to `self.sol`.
+        save_Isp : bool
+            Whether to calculate and save spontaneous emission current.
 
         Returns
         -------
@@ -799,6 +800,14 @@ class LaserDiode1D(object):
         R_rad = rec.rad_R(n[1:-1], p[1:-1], n0, p0, B_rad)
         R_aug = rec.auger_R(n[1:-1], p[1:-1], n0, p0, Cn, Cp)
         R = (R_srh + R_rad + R_aug)
+
+        if save_Isp:  # store recombination currents
+            self.sol['I_srh'] = (np.sum(R_srh * w)
+                                 * self.w * self.L * self.q)
+            self.sol['I_rad'] = (np.sum(R_rad * w)
+                                 * self.w * self.L * self.q)
+            self.sol['I_aug'] = (np.sum(R_aug * w)
+                                 * self.w * self.L * self.q)
 
         # recombination rates' derivatives
         dRsrh_dpsi = rec.srh_Rdot(n[1:-1], dn_dpsi[1:-1],
@@ -959,7 +968,8 @@ class LaserDiode1D(object):
 
         return J, rvec
 
-    def transport_step(self, omega=1.0, discr='mSG'):
+    def transport_step(self, omega=1.0, discr='mSG', save_J=True,
+                       save_Isp=True):
         """
         Perform a single Newton step for the transport problem.
 
@@ -969,9 +979,15 @@ class LaserDiode1D(object):
             Damping parameter (`x += dx*omega`).
         discr : str
             Current density discretiztion scheme.
+        save_J : bool
+            Whether to save calculated current density to `self.sol`.
+        save_Isp : bool
+            Whether to calculate and save spontaneous emission current.
 
         """
-        J, rvec = self._transport_system(discr, laser=False)
+        J, rvec = self._transport_system(discr, laser=False,
+                                         save_J=save_J,
+                                         save_Isp=save_Isp)
         dx = sparse.linalg.spsolve(J, -rvec)
 
         # calculating and saving fluctuation
@@ -997,7 +1013,8 @@ class LaserDiode1D(object):
             assert isinstance(S_init, (float, int))
             self.sol['S'] = S_init
 
-    def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
+    def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG',
+                    save_J=True, save_Isp=True):
         """
         Perform a single Newton step for the lasing problem.
 
@@ -1010,10 +1027,16 @@ class LaserDiode1D(object):
             for increasing `S`, second -- for decreasing `S`.
         discr : str
             Current density discretiztion scheme.
+        save_J : bool
+            Whether to save calculated current density to `self.sol`.
+        save_Isp : bool
+            Whether to calculate and save spontaneous emission current.
 
         """
         # residual vector and Jacobian for transport problem
-        J, rvec = self._transport_system(discr, laser=True)
+        J, rvec = self._transport_system(discr, laser=True,
+                                         save_J=save_J,
+                                         save_Isp=save_Isp)
 
         # solve the system
         dx = sparse.linalg.spsolve(J, -rvec)

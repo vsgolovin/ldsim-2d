@@ -29,6 +29,9 @@ ld.solve_equilibrium()
 voltages = np.arange(0, 2.51, 0.1)
 j_values = np.zeros_like(voltages)
 I_values = np.zeros_like(voltages)
+Isrh_values = np.zeros_like(voltages)
+Irad_values = np.zeros_like(voltages)
+Iaug_values = np.zeros_like(voltages)
 P_values = np.zeros_like(voltages)
 print('Voltage Iterations Power')
 
@@ -58,6 +61,12 @@ for i, v in enumerate(voltages):
     j_values[i] = -ld.sol['J'] * units.j                 # A/cm2
     I_values[i] = -ld.sol['I'] * (units.j * units.x**2)  # A
     P_values[i] = ld.sol['P'] * (units.E / units.t)      # W
+    # recombination currents
+    Isrh_values[i] = ld.sol['I_srh'] * (units.j * units.x**2)
+    Irad_values[i] = ld.sol['I_rad'] * (units.j * units.x**2)
+    Iaug_values[i] = ld.sol['I_aug'] * (units.j * units.x**2)
+
+    # save current band diagram and display progress
     ld.export_results(folder='results', x_to_um=True)
     print('  %5d    %.1e' % (ld.iterations, P_values[i]))
 
@@ -107,10 +116,12 @@ plt.plot(I_values, P_values, 'b.-')
 plt.xlabel('$I$ (A)')
 plt.ylabel('$P$ (W)')
 
-# export V, J, I, P
+# export arrays with simulation results
 with open(export_folder + '/' + 'LIV.csv', 'w') as f:
-    f.write(','.join(('V', 'J', 'I', 'P')))
+    f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug')))
     for i in range(len(voltages)):
         f.write('\n')
-        vals = map(str, (voltages[i], j_values[i], I_values[i], P_values[i]))
+        vals = map(str, (voltages[i], j_values[i], I_values[i],
+                         P_values[i], Isrh_values[i], Irad_values[i],
+                         Iaug_values[i]))
         f.write(','.join(vals))
