@@ -44,7 +44,7 @@ for i, v in enumerate(voltages):
                          # solution L2 norms
     while fluct > 1e-8:  # perform Newton's method iterations
         # choose value of damping parameter `omega`
-        # depending on iteration number
+        # depending on fluctuation
         if fluct > 1e-3:
             omega = 0.05
         else:
@@ -52,8 +52,8 @@ for i, v in enumerate(voltages):
         fluct = ld.lasing_step(omega=omega, omega_S=(1.0, omega), discr='mSG')
     # omega -- damping parameter for potentials
     # omega_S -- damping parameters for photon density S
-    # The first one is used when increasing S, the second one -- when
-    # decreasing S.
+    # `omega_S[0]` is used when increasing S,
+    # `omega_S[1]` -- when decreasing S.
     # This is needed so that system does not converge to negative photon
     # density at threshold.
 
@@ -67,7 +67,8 @@ for i, v in enumerate(voltages):
     Iaug_values[i] = ld.sol['I_aug'] * (units.j * units.x**2)
 
     # save current band diagram and display progress
-    ld.export_results(folder='results', x_to_um=True)
+    if export:
+        ld.export_results(folder='results', x_to_um=True)
     print('  %5d    %.1e' % (ld.iterations, P_values[i]))
 
 ld.original_units()
@@ -93,19 +94,19 @@ plt.plot(x, -ld.sol['phi_n'], 'b:', label=r'$\varphi_n$')
 plt.plot(x, -ld.sol['phi_p'], 'r:', label=r'$\varphi_p$')
 plt.legend()
 plt.xlabel(r'$x$ ($\mu$m)')
-plt.ylabel(r'$E$ (eV)')
+plt.ylabel('$E$ (eV)')
 
 plt.figure('Concentrations')
 plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color='k')
 plt.plot(x, ld.yin['Ev']-ld.sol['psi'], color='k')
 plt.xlabel(r'$x$ ($\mu$m)')
-plt.ylabel(r'$E$ (eV)')
+plt.ylabel('$E$ (eV)')
 plt.twinx()
 plt.plot(x, ld.sol['n'], 'b-', label=r'$n$')
 plt.plot(x, ld.sol['p'], 'r-', label=r'$p$')
 plt.legend()
 plt.yscale('log')
-plt.ylabel(r'$n$, $p$ (cm$^-3$)')
+plt.ylabel('$n$, $p$ (cm$^-3$)')
 
 plt.figure('J-V curve')
 plt.plot(voltages, j_values*1e-3, 'b.-')
@@ -118,11 +119,12 @@ plt.xlabel('$I$ (A)')
 plt.ylabel('$P$ (W)')
 
 # export arrays with simulation results
-with open(export_folder + '/' + 'LIV.csv', 'w') as f:
-    f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug')))
-    for i in range(len(voltages)):
-        f.write('\n')
-        vals = map(str, (voltages[i], j_values[i], I_values[i],
-                         P_values[i], Isrh_values[i], Irad_values[i],
-                         Iaug_values[i]))
-        f.write(','.join(vals))
+if export:
+    with open(export_folder + '/' + 'LIV.csv', 'w') as f:
+        f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug')))
+        for i in range(len(voltages)):
+            f.write('\n')
+            vals = map(str, (voltages[i], j_values[i], I_values[i],
+                            P_values[i], Isrh_values[i], Irad_values[i],
+                            Iaug_values[i]))
+            f.write(','.join(vals))

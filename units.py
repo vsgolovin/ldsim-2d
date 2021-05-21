@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 21 16:10:05 2020
-
-@author: vsgolovin
+Unit values for nondimensionalization.
 """
 
 import constants as const
