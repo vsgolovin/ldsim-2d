@@ -954,14 +954,14 @@ class LaserDiode1D(object):
             # bottom row -- photon density RE
             inds = np.where(ixa[1:-1])[0]
             J[-1, inds] = (self.beta_sp * dRrad_dpsi[ixa[1:-1]]
-                                    * w_ar * T
-                                    + self.vg * gain_dpsi * w_ar * T * S)
+                           * w_ar * T
+                           + self.vg * gain_dpsi * w_ar * T * S)
             J[-1, inds+m] = (self.beta_sp * dRrad_dphin[ixa[1:-1]]
-                                    * w_ar * T
-                                    + self.vg * gain_dphin * w_ar * T * S)
+                             * w_ar * T
+                             + self.vg * gain_dphin * w_ar * T * S)
             J[-1, inds+2*m] = (self.beta_sp * dR_dphip[ixa[1:-1]]
-                                        * w_ar * T * S
-                                        + self.vg * gain_dphip * w_ar * T * S)
+                               * w_ar * T
+                               + self.vg * gain_dphip * w_ar * T * S)
             J[-1, -1] = self.vg * total_gain
             J = J.tocsc()  # for `sparse.linalg.spsolve`
 
