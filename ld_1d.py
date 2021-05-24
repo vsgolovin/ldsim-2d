@@ -959,7 +959,7 @@ class LaserDiode1D(object):
             J[-1, inds+m] = (self.beta_sp * dRrad_dphin[ixa[1:-1]]
                              * w_ar * T
                              + self.vg * gain_dphin * w_ar * T * S)
-            J[-1, inds+2*m] = (self.beta_sp * dR_dphip[ixa[1:-1]]
+            J[-1, inds+2*m] = (self.beta_sp * dRrad_dphip[ixa[1:-1]]
                                * w_ar * T
                                + self.vg * gain_dphip * w_ar * T * S)
             J[-1, -1] = self.vg * total_gain
