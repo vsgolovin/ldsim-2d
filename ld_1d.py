@@ -279,11 +279,11 @@ class LaserDiode1D(object):
 
         # arrays
         for key in self.yin:
-            self.yin[key] /= unit_values[key]
+            self.yin[key] /= units.dct[key]
         for key in self.ybn:
-            self.ybn[key] /= unit_values[key]
+            self.ybn[key] /= units.dct[key]
         for key in self.sol:
-            self.sol[key] /= unit_values[key]
+            self.sol[key] /= units.dct[key]
 
         self.is_dimensionless = True
 
@@ -314,11 +314,11 @@ class LaserDiode1D(object):
 
         # arrays
         for key in self.yin:
-            self.yin[key] *= unit_values[key]
+            self.yin[key] *= units.dct[key]
         for key in self.ybn:
-            self.ybn[key] *= unit_values[key]
+            self.ybn[key] *= units.dct[key]
         for key in self.sol:
-            self.sol[key] *= unit_values[key]
+            self.sol[key] *= units.dct[key]
 
         self.is_dimensionless = False
 
@@ -1204,7 +1204,7 @@ if __name__ == '__main__':
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
-    ld.transport_init(0.1)
+    ld.lasing_init(0.1)
     for _ in range(nsteps):
         ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
     print('Complete.')
