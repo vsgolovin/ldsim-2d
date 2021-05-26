@@ -8,6 +8,7 @@ from scipy import sparse
 from ld_1d import LaserDiode1D
 import units
 from newton import l2_norm
+import recombination as rec
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -15,8 +16,12 @@ class LaserDiode2D(LaserDiode1D):
                  lam, ng, alpha_i, beta_sp):
         LaserDiode1D.__init__(self, design, ar_inds, L, w, R1, R2,
                               lam, ng, alpha_i, beta_sp)
-        self.dz = L  # longitudinal grid step
+        self.nz = 1          # number of z grid nodes
+        self.dz = L          # longitudinal grid step
         self.sol2d = list()  # solution at every slice
+        self.Sf = np.zeros(self.nz)
+        self.Sb = np.zeros(self.nz)
+        self.ndim = 1        # initialize as 1D
 
     def make_dimensionless(self):
         LaserDiode1D.make_dimensionless(self)
@@ -27,14 +32,63 @@ class LaserDiode2D(LaserDiode1D):
         self.dz *= units.x
 
     def to_2D(self, n):
+        self.nz = n
         self.sol2d = [dict() for _ in range(n)]
+        S0 = self.sol['S'] / 2
         for i in range(n):
             for key in ('psi', 'phi_n', 'phi_p', 'n', 'p'):
                 self.sol2d[i][key] = self.sol[key].copy()
-            self.sol2d[i]['S'] = self.sol['S']
-            self.sol2d[i]['Sf'] = self.sol2d[i]['S'] / 2
-            self.sol2d[i]['Sb'] = self.sol2d[i]['S'] / 2
         self.dz = self.L / n
+        self.ndim = 2
+        self._calculate_Sf_Sb(S0)
+        for i in range(n):
+            self.sol2d[i]['S'] = self.Sf[i] + self.Sb[i]
+
+    def _calculate_Sf_Sb(self, S0):
+        assert self.ndim == 2
+
+        # calculate gain and radiative recombination rate
+        ixa = self.ar_ix
+        g = np.zeros(self.nz)
+        R_rad = np.zeros(self.nz)
+        for i in range(self.nz):
+            self.sol = self.sol2d[i]
+
+            # material gain
+            n = self.sol['n'][ixa]
+            p = self.sol['p'][ixa]
+            N = np.zeros_like(n)
+            ixn = n < p
+            N[ixn] = n[ixn]
+            N[~ixn] = p[~ixn]
+            gain = self.yin['g0'][ixa] * np.log(N / self.yin['N_tr'][ixa])
+
+            # modal gain
+            self.sol = self.sol2d[i]
+            alpha = self.alpha_i + self._calculate_fca()
+            w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
+            T = self.yin['wg_mode'][ixa]
+            g[i] = np.sum(gain * T * w) - alpha
+
+            # radiative recombination
+            R = rec.rad_R(self.sol['n'][ixa], self.sol['p'][ixa],
+                          self.yin['n0'][ixa], self.yin['p0'][ixa],
+                          self.yin['B'][ixa])
+            R_rad[i] = np.sum(R * T * w) / 2
+
+        # calculate photon densities
+        Sf = np.zeros(self.nz)
+        Sb = np.zeros(self.nz)
+        Sf[0] = S0
+        k = self.beta_sp / self.vg
+        for i in range(0, self.nz-1):
+            Sf[i+1] = Sf[i] + ((Sf[i]*g[i] + k*R_rad[i]) * self.dz)
+        Sb[-1] = (Sf[-1] + ((Sf[-1]*g[-1] + k*R_rad[-1]) * self.dz)) * self.R2
+        for i in range(self.nz-1, 0, -1):
+            Sb[i-1] = Sb[i] + ((Sb[i]*g[i] + k*R_rad[i]) * self.dz)
+
+        self.Sf = Sf
+        self.Sb = Sb
 
     def _transport_system_2D(self, Phi, discr):
         J, r = self._transport_system(discr, laser=True, save_J=False,
@@ -45,8 +99,8 @@ class LaserDiode2D(LaserDiode1D):
 
     def lasing_step_2D(self, discr='mSG', niter=10, omega=0.1,
                        omega_S=(1.0, 0.1)):
-        Sf = np.array([d['Sf'] for d in self.sol2d])
-        Sb = np.array([d['Sb'] for d in self.sol2d])
+        Sf = self.Sf
+        Sb = self.Sb
         nz = len(self.sol2d)
         Phi = np.zeros(nz)
         Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
@@ -75,8 +129,8 @@ class LaserDiode2D(LaserDiode1D):
                            np.array([self.sol['S']])))
             fluct += (l2_norm(dx) / l2_norm(x)) / nz
 
+        # self._calculate_Sf_Sb()
         return fluct
-
 
 
 if __name__ == '__main__':
@@ -101,10 +155,15 @@ if __name__ == '__main__':
         ld.lasing_init(V)
         fluct = 1.0
         while fluct > 1e-8:
-            fluct = ld.lasing_step(0.05, (1., 0.05))
+            if fluct > 1e-3:
+                omega = 0.05
+            else:
+                omega = 0.2
+            fluct = ld.lasing_step(omega, (1., omega))
         print(ld.iterations)
         V += dV
 
     # convert to 2D and perform one iteration along longitudinal axis
+    S = ld.sol['S']
     ld.to_2D(10)
     fluct = ld.lasing_step_2D()
