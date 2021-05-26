@@ -4,7 +4,7 @@
 """
 
 import numpy as np
-from scipy import sparse
+from scipy import sparse, optimize
 from ld_1d import LaserDiode1D
 import units
 from newton import l2_norm
@@ -34,15 +34,27 @@ class LaserDiode2D(LaserDiode1D):
     def to_2D(self, n):
         self.nz = n
         self.sol2d = [dict() for _ in range(n)]
-        S0 = self.sol['S'] / 2
         for i in range(n):
             for key in ('psi', 'phi_n', 'phi_p', 'n', 'p'):
                 self.sol2d[i][key] = self.sol[key].copy()
+                self.sol2d[i]['S'] = self.sol['S']
         self.dz = self.L / n
         self.ndim = 2
-        self._calculate_Sf_Sb(S0)
+
+        self._fit_Sf_Sb()
+        Sf, Sb = self.Sf, self.Sb
         for i in range(n):
-            self.sol2d[i]['S'] = self.Sf[i] + self.Sb[i]
+            self.sol2d[i]['S'] = Sf[i] + Sb[i]
+
+    def _fit_Sf_Sb(self, div=3):
+        assert self.ndim == 2
+        S = np.array([d['S'] for d in self.sol2d])
+        def sumsq(S0):
+            Sf, Sb = self._calculate_Sf_Sb(S0)
+            # S_new = (Sf[1:]+Sf[:-1])/2 + (Sb[1:]+Sb[:-1])/2
+            return np.sum((Sf+Sb-S)**2)
+        res = optimize.minimize(sumsq, S[0]/3)
+        self.Sf, self.Sb = self._calculate_Sf_Sb(res.x)
 
     def _calculate_Sf_Sb(self, S0):
         assert self.ndim == 2
@@ -62,6 +74,7 @@ class LaserDiode2D(LaserDiode1D):
             N[ixn] = n[ixn]
             N[~ixn] = p[~ixn]
             gain = self.yin['g0'][ixa] * np.log(N / self.yin['N_tr'][ixa])
+            gain[gain<0] = 0
 
             # modal gain
             self.sol = self.sol2d[i]
@@ -81,14 +94,16 @@ class LaserDiode2D(LaserDiode1D):
         Sb = np.zeros(self.nz)
         Sf[0] = S0
         k = self.beta_sp / self.vg
+        # print(np.sum(g), self.alpha_m)
         for i in range(0, self.nz-1):
             Sf[i+1] = Sf[i] + ((Sf[i]*g[i] + k*R_rad[i]) * self.dz)
-        Sb[-1] = (Sf[-1] + ((Sf[-1]*g[-1] + k*R_rad[-1]) * self.dz)) * self.R2
+        Sb[-1] = Sf[-1]*self.R2 + ((Sf[-1]*self.R2*g[-1] + k*R_rad[-1]) * self.dz)
         for i in range(self.nz-1, 0, -1):
             Sb[i-1] = Sb[i] + ((Sb[i]*g[i] + k*R_rad[i]) * self.dz)
+        S0_2 = Sb[0]*self.R1 + ((Sb[0]*self.R1*g[0] + k*R_rad[0]) * self.dz)
+        print(S0_2 / S0)
 
-        self.Sf = Sf
-        self.Sb = Sb
+        return Sf, Sb
 
     def _transport_system_2D(self, Phi, discr):
         J, r = self._transport_system(discr, laser=True, save_J=False,
@@ -104,8 +119,9 @@ class LaserDiode2D(LaserDiode1D):
         nz = len(self.sol2d)
         Phi = np.zeros(nz)
         Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
-        Phi[0] = Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1
-        Phi[-1] = Sf[-1] * self.R2 - Sb[-1] - Sf[-1] + Sf[-2]
+        Phi[0] = (Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1) / self.dz
+        Phi[-1] = (Sf[-1] * self.R2 - Sb[-1] - Sf[-1] + Sf[-2]) / self.dz
+        print(Phi)
         m = self.npoints - 2
 
         fluct = 0
@@ -129,11 +145,14 @@ class LaserDiode2D(LaserDiode1D):
                            np.array([self.sol['S']])))
             fluct += (l2_norm(dx) / l2_norm(x)) / nz
 
-        # self._calculate_Sf_Sb()
+        self._fit_Sf_Sb()
+        for i in range(self.nz):
+            self.sol2d[i]['S'] = self.Sf[i] + self.Sb[i]
         return fluct
 
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     from sample_design import sd
 
     # initialize problem
@@ -164,6 +183,19 @@ if __name__ == '__main__':
         V += dV
 
     # convert to 2D and perform one iteration along longitudinal axis
-    S = ld.sol['S']
-    ld.to_2D(10)
-    fluct = ld.lasing_step_2D()
+    ld.to_2D(100)
+
+    S0 = np.array([d['S'] for d in ld.sol2d])
+    flucts = list()
+    for i in range(10):
+        print(i)
+        fluct = ld.lasing_step_2D(omega=0.2, omega_S=(0.2, 0.2), niter=10)
+        flucts.append(fluct)
+    S1 = np.array([d['S'] for d in ld.sol2d])
+
+    plt.figure()
+    plt.plot(S0)
+    plt.plot(S1)
+
+    plt.figure()
+    plt.semilogy(flucts)
