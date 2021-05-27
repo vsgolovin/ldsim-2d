@@ -8,7 +8,6 @@ from scipy import sparse, optimize
 from ld_1d import LaserDiode1D
 import units
 from newton import l2_norm
-import recombination as rec
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -16,20 +15,35 @@ class LaserDiode2D(LaserDiode1D):
                  lam, ng, alpha_i, beta_sp):
         LaserDiode1D.__init__(self, design, ar_inds, L, w, R1, R2,
                               lam, ng, alpha_i, beta_sp)
-        self.nz = 1          # number of z grid nodes
-        self.dz = L          # longitudinal grid step
-        self.sol2d = list()  # solution at every slice
-        self.Sf = np.zeros(self.nz)
-        self.Sb = np.zeros(self.nz)
-        self.ndim = 1        # initialize as 1D
+        self.nz = 1             # number of z grid nodes
+        self.dz = L             # longitudinal grid step
+        self.zin = np.zeros(1)  # z grid nodes
+        self.zbn = np.zeros(1)  # z grid volume boundaries
+        self.sol2d = list()     # solution at every slice
+        self.ndim = 1           # initialize as 1D
+
+        # photon distribution along z
+        self.Sf = np.zeros(self.nz)  # forward-propagating
+        self.Sb = np.zeros(self.nz)  # backward-propagating
+        self.G = np.zeros(self.nz)   # net gain (Gamma*g - alpha_i)
 
     def make_dimensionless(self):
         LaserDiode1D.make_dimensionless(self)
         self.dz /= units.x
+        self.zin /= units.x
+        self.zbn /= units.x
+        self.Sf /= units.n * units.x
+        self.Sb /= units.n * units.x
+        self.G /= (1 / units.x)
 
     def original_units(self):
-        LaserDiode1D.original_units()
+        LaserDiode1D.original_units(self)
         self.dz *= units.x
+        self.zin *= units.x
+        self.zbn *= units.x
+        self.Sf *= units.n * units.x
+        self.Sb *= units.n * units.x
+        self.G *= (1 / units.x)
 
     def to_2D(self, n):
         self.nz = n
@@ -38,70 +52,72 @@ class LaserDiode2D(LaserDiode1D):
             for key in ('psi', 'phi_n', 'phi_p', 'n', 'p'):
                 self.sol2d[i][key] = self.sol[key].copy()
                 self.sol2d[i]['S'] = self.sol['S']
-        self.dz = self.L / n
         self.ndim = 2
+        self.dz = self.L / n
+        self.zin = np.arange(self.dz / 2, self.L, self.dz)
+        self.zbn = np.linspace(0, self.L, self.nz + 1)
+        self._calculate_G()  # fills self.G
 
         self._fit_Sf_Sb()
         Sf, Sb = self.Sf, self.Sb
         for i in range(n):
-            self.sol2d[i]['S'] = Sf[i] + Sb[i]
+            self.sol2d[i]['S'] = (Sf[i]+Sf[i+1])/2 + (Sb[i]+Sb[i+1])/2
 
     def _fit_Sf_Sb(self, div=3):
         assert self.ndim == 2
         S = np.array([d['S'] for d in self.sol2d])
         def sumsq(S0):
             Sf, Sb = self._calculate_Sf_Sb(S0)
-            # S_new = (Sf[1:]+Sf[:-1])/2 + (Sb[1:]+Sb[:-1])/2
-            return np.sum((Sf+Sb-S)**2)
-        res = optimize.minimize(sumsq, S[0]/3)
+            S_new = (Sf[1:]+Sf[:-1])/2 + (Sb[1:]+Sb[:-1])/2
+            return np.sum((S_new-S)**2)
+        res = optimize.minimize(sumsq, S[0]/div)
         self.Sf, self.Sb = self._calculate_Sf_Sb(res.x)
 
-    def _calculate_Sf_Sb(self, S0):
+    def _calculate_G(self):
+        "Calculate net gain for every slice and store in `self.G`."
         assert self.ndim == 2
-
-        # calculate gain and radiative recombination rate
+        # material parameters are same for all slices
         ixa = self.ar_ix
-        g = np.zeros(self.nz)
-        R_rad = np.zeros(self.nz)
-        for i in range(self.nz):
-            self.sol = self.sol2d[i]
+        g0 = self.yin['g0'][ixa]
+        N_tr = self.yin['N_tr'][ixa]
+        w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
+        T = self.yin['wg_mode'][ixa]
 
-            # material gain
-            n = self.sol['n'][ixa]
-            p = self.sol['p'][ixa]
-            N = np.zeros_like(n)
+        # iterate over slices
+        self.G = np.zeros(self.nz)
+        for i in range(self.nz):
+            n = self.sol2d[i]['n'][ixa]
+            p = self.sol2d[i]['p'][ixa]
+            N = p.copy()
             ixn = n < p
             N[ixn] = n[ixn]
-            N[~ixn] = p[~ixn]
-            gain = self.yin['g0'][ixa] * np.log(N / self.yin['N_tr'][ixa])
-            gain[gain<0] = 0
+            g = g0 * np.log(N / N_tr)
+            g[g < 0] = 0.0
+            alpha_fca = self._calculate_fca(self.sol2d[i]['n'],
+                                            self.sol2d[i]['p'])
+            self.G[i] = np.sum(g * T * w) - (self.alpha_i + alpha_fca)
 
-            # modal gain
-            self.sol = self.sol2d[i]
-            alpha = self.alpha_i + self._calculate_fca()
-            w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
-            T = self.yin['wg_mode'][ixa]
-            g[i] = np.sum(gain * T * w) - alpha
+    def _calculate_Sf_Sb(self, Sf0):
+        """
+        Returns forward- and backward-propagating forward densities `Sf`
+        and `Sb` assuming `Sf[0] = Sf0`.
+        Ignores spontaneous emission.
+        """
+        assert self.ndim == 2
 
-            # radiative recombination
-            R = rec.rad_R(self.sol['n'][ixa], self.sol['p'][ixa],
-                          self.yin['n0'][ixa], self.yin['p0'][ixa],
-                          self.yin['B'][ixa])
-            R_rad[i] = np.sum(R * T * w) / 2
+        # forward propagation
+        # Gdz = np.cumsum(self.G * self.dz)
+        Sf = np.zeros(self.nz + 1)
+        Sf[0] = Sf0
+        for i in range(self.nz):
+            Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz)
 
-        # calculate photon densities
-        Sf = np.zeros(self.nz)
-        Sb = np.zeros(self.nz)
-        Sf[0] = S0
-        k = self.beta_sp / self.vg
-        # print(np.sum(g), self.alpha_m)
-        for i in range(0, self.nz-1):
-            Sf[i+1] = Sf[i] + ((Sf[i]*g[i] + k*R_rad[i]) * self.dz)
-        Sb[-1] = Sf[-1]*self.R2 + ((Sf[-1]*self.R2*g[-1] + k*R_rad[-1]) * self.dz)
-        for i in range(self.nz-1, 0, -1):
-            Sb[i-1] = Sb[i] + ((Sb[i]*g[i] + k*R_rad[i]) * self.dz)
-        S0_2 = Sb[0]*self.R1 + ((Sb[0]*self.R1*g[0] + k*R_rad[0]) * self.dz)
-        print(S0_2 / S0)
+        # back propagation
+        # Gdz = np.cumsum(self.G[::-1] * self.dz)[::-1]
+        Sb = np.zeros(self.nz + 1)
+        Sb[-1] = Sf[-1] * self.R2
+        for i in range(self.nz, 0, -1):
+            Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz)
 
         return Sf, Sb
 
@@ -117,11 +133,11 @@ class LaserDiode2D(LaserDiode1D):
         Sf = self.Sf
         Sb = self.Sb
         nz = len(self.sol2d)
-        Phi = np.zeros(nz)
-        Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
-        Phi[0] = (Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1) / self.dz
-        Phi[-1] = (Sf[-1] * self.R2 - Sb[-1] - Sf[-1] + Sf[-2]) / self.dz
-        print(Phi)
+        Phi = (Sb[1:] - Sb[:-1] - Sf[1:] + Sf[:-1]) / self.dz
+        # Phi = np.zeros(nz)
+        # Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
+        # Phi[0] = (Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1) / self.dz
+        # Phi[-1] = (Sf[-1] * self.R2 - Sb[-1] - Sf[-1] + Sf[-2]) / self.dz
         m = self.npoints - 2
 
         fluct = 0
@@ -146,8 +162,9 @@ class LaserDiode2D(LaserDiode1D):
             fluct += (l2_norm(dx) / l2_norm(x)) / nz
 
         self._fit_Sf_Sb()
+        Sf, Sb = self.Sf, self.Sb
         for i in range(self.nz):
-            self.sol2d[i]['S'] = self.Sf[i] + self.Sb[i]
+            self.sol2d[i]['S'] = (Sf[i]+Sf[i+1])/2 + (Sb[i]+Sb[i+1])/2
         return fluct
 
 
@@ -183,14 +200,15 @@ if __name__ == '__main__':
         V += dV
 
     # convert to 2D and perform one iteration along longitudinal axis
-    ld.to_2D(100)
+    S_1D = ld.sol['S']
+    ld.to_2D(10)
 
     S0 = np.array([d['S'] for d in ld.sol2d])
     flucts = list()
-    for i in range(10):
-        print(i)
+    for i in range(100):
         fluct = ld.lasing_step_2D(omega=0.2, omega_S=(0.2, 0.2), niter=10)
         flucts.append(fluct)
+        print(i, fluct, ld.sol2d[0]['S'])
     S1 = np.array([d['S'] for d in ld.sol2d])
 
     plt.figure()

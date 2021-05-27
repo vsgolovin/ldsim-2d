@@ -22,6 +22,5 @@ dct = {'Ev': E, 'Ec': E, 'Eg': E, 'Nd': n, 'Na': n, 'C_dop': n,
        'n0': n, 'p0': n, 'psi_lcn': V, 'psi_bi': V,
        'psi': V, 'phi_n': V, 'phi_p': V,
        'n': n, 'p': n, 'g0': 1 / x, 'N_tr': n,
-       'S': n * x, 'Sf': n * x, 'Sb': n * x,  'P': E / t,
-       'J': j, 'I': j * x**2,
+       'S': n * x, 'P': E / t, 'J': j, 'I': j * x**2,
        'I_srh': j * x**2, 'I_rad': j * x**2, 'I_aug': j * x**2}

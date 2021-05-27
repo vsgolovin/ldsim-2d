@@ -521,12 +521,18 @@ class LaserDiode1D(object):
         self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
                              self.yin['Nv'], self.yin['Ev'], self.Vt)
 
-    def _calculate_fca(self):
+    def _calculate_fca(self, n=None, p=None):
         "Calculate free-carrier absorption."
         T = self.yin['wg_mode'][1:-1]
         w = self.xbn[1:] - self.xbn[:-1]
-        n = self.sol['n'][1:-1]
-        p = self.sol['p'][1:-1]
+        if n is None:
+            n = self.sol['n'][1:-1]
+        else:
+            n = n[1:-1]
+        if p is None:
+            p = self.sol['p'][1:-1]
+        else:
+            p = p[1:-1]
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
 
