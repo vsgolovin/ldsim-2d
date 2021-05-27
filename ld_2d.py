@@ -4,10 +4,11 @@
 """
 
 import numpy as np
-from scipy import sparse, optimize
+from scipy import sparse, optimize, interpolate
 from ld_1d import LaserDiode1D
 import units
 from newton import l2_norm
+import recombination as rec
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -59,17 +60,19 @@ class LaserDiode2D(LaserDiode1D):
         self._calculate_G()  # fills self.G
 
         self._fit_Sf_Sb()
-        Sf, Sb = self.Sf, self.Sb
-        for i in range(n):
-            self.sol2d[i]['S'] = (Sf[i]+Sf[i+1])/2 + (Sb[i]+Sb[i+1])/2
+        S = self._calculate_S()
+        for i in range(self.nz):
+            self.sol2d[i]['S'] = S[i]
 
     def _fit_Sf_Sb(self, div=3):
         assert self.ndim == 2
         S = np.array([d['S'] for d in self.sol2d])
+
         def sumsq(S0):
             Sf, Sb = self._calculate_Sf_Sb(S0)
-            S_new = (Sf[1:]+Sf[:-1])/2 + (Sb[1:]+Sb[:-1])/2
+            S_new = self._calculate_S(Sf, Sb)
             return np.sum((S_new-S)**2)
+
         res = optimize.minimize(sumsq, S[0]/div)
         self.Sf, self.Sb = self._calculate_Sf_Sb(res.x)
 
@@ -105,19 +108,39 @@ class LaserDiode2D(LaserDiode1D):
         """
         assert self.ndim == 2
 
+        # radiative recombination
+        ixa = self.ar_ix
+        T = self.yin['wg_mode'][ixa]
+        w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
+        n0 = self.yin['n0'][ixa]
+        p0 = self.yin['p0'][ixa]
+        B = self.yin['B'][ixa]
+        gamma = self.beta_sp / (2 * self.vg) * self.dz
+        dS_rad = np.zeros(self.nz)
+        for i in range(self.nz):
+            n = self.sol2d[i]['n'][ixa]
+            p = self.sol2d[i]['p'][ixa]
+            R_rad = rec.rad_R(n, p, n0, p0, B)
+            dS_rad[i] = gamma * np.sum(R_rad * T * w)
+
         # forward propagation
         # Gdz = np.cumsum(self.G * self.dz)
         Sf = np.zeros(self.nz + 1)
         Sf[0] = Sf0
         for i in range(self.nz):
-            Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz)
+            Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz) + dS_rad[i]
+
+        # Sb = np.zeros(self.nz + 1)
+        # Sb[0] = Sf0 / self.R1
+        # for i in range(self.nz):
+        #     Sb[i+1] = Sb[i] / np.exp(self.G[i] * self.dz)
 
         # back propagation
         # Gdz = np.cumsum(self.G[::-1] * self.dz)[::-1]
         Sb = np.zeros(self.nz + 1)
         Sb[-1] = Sf[-1] * self.R2
         for i in range(self.nz, 0, -1):
-            Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz)
+            Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz) + dS_rad[i-1]
 
         return Sf, Sb
 
@@ -130,10 +153,19 @@ class LaserDiode2D(LaserDiode1D):
 
     def lasing_step_2D(self, discr='mSG', niter=10, omega=0.1,
                        omega_S=(1.0, 0.1)):
-        Sf = self.Sf
-        Sb = self.Sb
+        # Sf = self.Sf
+        # Sb = self.Sb
         nz = len(self.sol2d)
-        Phi = (Sb[1:] - Sb[:-1] - Sf[1:] + Sf[:-1]) / self.dz
+        Sf_fun = interpolate.InterpolatedUnivariateSpline(self.zbn,
+                                                          self.Sf,
+                                                          k=3)
+        Sfdot_fun = Sf_fun.derivative()
+        Sb_fun = interpolate.InterpolatedUnivariateSpline(self.zbn,
+                                                          self.Sb,
+                                                          k=3)
+        Sbdot_fun = Sb_fun.derivative()
+        Phi = Sbdot_fun(self.zin) - Sfdot_fun(self.zin)
+        # Phi = (Sb[1:] - Sb[:-1] - Sf[1:] + Sf[:-1]) / self.dz
         # Phi = np.zeros(nz)
         # Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
         # Phi[0] = (Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1) / self.dz
@@ -162,10 +194,25 @@ class LaserDiode2D(LaserDiode1D):
             fluct += (l2_norm(dx) / l2_norm(x)) / nz
 
         self._fit_Sf_Sb()
-        Sf, Sb = self.Sf, self.Sb
+        S = self._calculate_S()
         for i in range(self.nz):
-            self.sol2d[i]['S'] = (Sf[i]+Sf[i+1])/2 + (Sb[i]+Sb[i+1])/2
+            self.sol2d[i]['S'] = S[i]
         return fluct
+
+    def _calculate_S(self, Sf=None, Sb=None):
+        if Sf is None or Sb is None:
+            assert self.ndim == 2
+            Sf = self.Sf
+            Sb = self.Sb
+        S_calc = Sf + Sb
+        f = interpolate.InterpolatedUnivariateSpline(self.zbn,
+                                                    S_calc,
+                                                    k=3)
+        S = f(self.zin)
+        # S = (S_calc[1:] + S_calc[:-1]) / 2
+        return S
+        # for i in range(self.nz):
+        #     self.sol2d[i]['S'] = (S_calc[i] + S_calc[i+1]) / 2
 
 
 if __name__ == '__main__':
@@ -206,7 +253,7 @@ if __name__ == '__main__':
     S0 = np.array([d['S'] for d in ld.sol2d])
     flucts = list()
     for i in range(100):
-        fluct = ld.lasing_step_2D(omega=0.2, omega_S=(0.2, 0.2), niter=10)
+        fluct = ld.lasing_step_2D(omega=0.25, omega_S=(0.25, 0.25), niter=10)
         flucts.append(fluct)
         print(i, fluct, ld.sol2d[0]['S'])
     S1 = np.array([d['S'] for d in ld.sol2d])
