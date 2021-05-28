@@ -8,7 +8,6 @@ from scipy import sparse, optimize, interpolate
 from ld_1d import LaserDiode1D
 import units
 from newton import l2_norm
-import recombination as rec
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -100,6 +99,14 @@ class LaserDiode2D(LaserDiode1D):
                                             self.sol2d[i]['p'])
             self.G[i] = np.sum(g * T * w) - (self.alpha_i + alpha_fca)
 
+        # correct gain at every node by `delta_g`
+        # so that photon density is preserved after a round trip
+        xi = np.exp(2 * np.sum(self.G) * self.dz) * self.R1 * self.R2
+        if abs(xi - 1) > 1e-4:
+            print(f'Warning: round-trip gain is {xi}.')
+        delta_g = -np.log(xi) / (2 * self.L)
+        self.G += delta_g
+
     def _calculate_Sf_Sb(self, Sf0):
         """
         Returns forward- and backward-propagating forward densities `Sf`
@@ -108,27 +115,13 @@ class LaserDiode2D(LaserDiode1D):
         """
         assert self.ndim == 2
 
-        # radiative recombination
-        ixa = self.ar_ix
-        T = self.yin['wg_mode'][ixa]
-        w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
-        n0 = self.yin['n0'][ixa]
-        p0 = self.yin['p0'][ixa]
-        B = self.yin['B'][ixa]
-        gamma = self.beta_sp / (2 * self.vg) * self.dz
-        dS_rad = np.zeros(self.nz)
-        for i in range(self.nz):
-            n = self.sol2d[i]['n'][ixa]
-            p = self.sol2d[i]['p'][ixa]
-            R_rad = rec.rad_R(n, p, n0, p0, B)
-            dS_rad[i] = gamma * np.sum(R_rad * T * w)
-
         # forward propagation
-        # Gdz = np.cumsum(self.G * self.dz)
+        Gdz = np.cumsum(self.G * self.dz)
         Sf = np.zeros(self.nz + 1)
         Sf[0] = Sf0
-        for i in range(self.nz):
-            Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz) + dS_rad[i]
+        Sf[1:] = Sf[0] * np.exp(Gdz)
+        # for i in range(self.nz):
+        #     Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz)
 
         # Sb = np.zeros(self.nz + 1)
         # Sb[0] = Sf0 / self.R1
@@ -136,11 +129,12 @@ class LaserDiode2D(LaserDiode1D):
         #     Sb[i+1] = Sb[i] / np.exp(self.G[i] * self.dz)
 
         # back propagation
-        # Gdz = np.cumsum(self.G[::-1] * self.dz)[::-1]
+        Gdz = np.cumsum(self.G[::-1] * self.dz)[::-1]
         Sb = np.zeros(self.nz + 1)
         Sb[-1] = Sf[-1] * self.R2
-        for i in range(self.nz, 0, -1):
-            Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz) + dS_rad[i-1]
+        Sb[:-1] = Sb[-1] * np.exp(Gdz)
+        # for i in range(self.nz, 0, -1):
+        #     Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz)
 
         return Sf, Sb
 
@@ -250,12 +244,15 @@ if __name__ == '__main__':
     S_1D = ld.sol['S']
     ld.to_2D(10)
 
+    n_iter = 1000
     S0 = np.array([d['S'] for d in ld.sol2d])
-    flucts = list()
-    for i in range(100):
-        fluct = ld.lasing_step_2D(omega=0.25, omega_S=(0.25, 0.25), niter=10)
-        flucts.append(fluct)
-        print(i, fluct, ld.sol2d[0]['S'])
+    flucts = np.zeros(n_iter)
+    S_vals = np.zeros(n_iter)
+    for i in range(n_iter):
+        fluct = ld.lasing_step_2D(omega=0.5, omega_S=(0.5, 0.5), niter=10)
+        flucts[i] = fluct
+        S_vals[i] = ld.sol2d[-1]['S']
+        print(i, flucts[i], S_vals[i])
     S1 = np.array([d['S'] for d in ld.sol2d])
 
     plt.figure()
@@ -263,4 +260,9 @@ if __name__ == '__main__':
     plt.plot(S1)
 
     plt.figure()
-    plt.semilogy(flucts)
+    plt.semilogy(np.arange(1, n_iter+1), flucts, color='b')
+    plt.xlabel('Iteration number')
+    plt.ylabel('Fluctuation', color='b')
+    plt.twinx()
+    plt.plot(np.arange(1, n_iter+1), S_vals, color='r')
+    plt.ylabel('Photon density', color='r')
