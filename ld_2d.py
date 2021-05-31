@@ -4,10 +4,13 @@
 """
 
 import numpy as np
-from scipy import sparse, optimize, interpolate
+from scipy import sparse
 from ld_1d import LaserDiode1D
 import units
-from newton import l2_norm
+import carrier_concentrations as cc
+import flux
+import recombination as rec
+import vrs
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -15,17 +18,16 @@ class LaserDiode2D(LaserDiode1D):
                  lam, ng, alpha_i, beta_sp):
         LaserDiode1D.__init__(self, design, ar_inds, L, w, R1, R2,
                               lam, ng, alpha_i, beta_sp)
-        self.nz = 1             # number of z grid nodes
-        self.dz = L             # longitudinal grid step
-        self.zin = np.zeros(1)  # z grid nodes
-        self.zbn = np.zeros(1)  # z grid volume boundaries
-        self.sol2d = list()     # solution at every slice
-        self.ndim = 1           # initialize as 1D
+        self.nz = 1                  # number of z grid nodes
+        self.dz = L                  # longitudinal grid step
+        self.zin = np.array(L/2)     # z grid nodes
+        self.zbn = np.array([0, L])  # z grid volume boundaries
+        self.sol2d = list()          # solution at every slice
+        self.ndim = 1                # initialize as 1D
 
         # photon distribution along z
         self.Sf = np.zeros(self.nz)  # forward-propagating
         self.Sb = np.zeros(self.nz)  # backward-propagating
-        self.G = np.zeros(self.nz)   # net gain (Gamma*g - alpha_i)
 
     def make_dimensionless(self):
         LaserDiode1D.make_dimensionless(self)
@@ -34,7 +36,11 @@ class LaserDiode2D(LaserDiode1D):
         self.zbn /= units.x
         self.Sf /= units.n * units.x
         self.Sb /= units.n * units.x
-        self.G /= (1 / units.x)
+
+        # 2D solution
+        for sol in self.sol2d:
+            for key in sol:
+                sol[key] /= units.dct[key]
 
     def original_units(self):
         LaserDiode1D.original_units(self)
@@ -43,175 +49,194 @@ class LaserDiode2D(LaserDiode1D):
         self.zbn *= units.x
         self.Sf *= units.n * units.x
         self.Sb *= units.n * units.x
-        self.G *= (1 / units.x)
+
+        # 2D solution
+        for sol in self.sol2d:
+            for key in sol:
+                sol[key] *= units.dct[key]
 
     def to_2D(self, n):
         self.nz = n
-        self.sol2d = [dict() for _ in range(n)]
-        for i in range(n):
-            for key in ('psi', 'phi_n', 'phi_p', 'n', 'p'):
-                self.sol2d[i][key] = self.sol[key].copy()
-                self.sol2d[i]['S'] = self.sol['S']
         self.ndim = 2
         self.dz = self.L / n
         self.zin = np.arange(self.dz / 2, self.L, self.dz)
         self.zbn = np.linspace(0, self.L, self.nz + 1)
-        self._calculate_G()  # fills self.G
+        S = self.sol['S']
+        self.Sf = np.zeros(n + 1)
+        self.Sf[0] = S * self.R1 / (1 + self.R1)
+        self.Sf[1:-1] = S / 2
+        self.Sf[-1] = S / (1 + self.R2)
+        self.Sb = np.zeros(n + 1)
+        self.Sb[0] = S / (1 + self.R1)
+        self.Sb[1:-1] = self.sol['S'] / 2
+        self.Sb[-1] = S * self.R2 / (1 + self.R2)
+        self.sol2d = [dict() for _ in range(n)]
+        for i in range(n):
+            for key in ('psi', 'phi_n', 'phi_p', 'n', 'p'):
+                self.sol2d[i][key] = self.sol[key].copy()
 
-        self._fit_Sf_Sb()
-        S = self._calculate_S()
-        for i in range(self.nz):
-            self.sol2d[i]['S'] = S[i]
+    def _transport_system_2D(self, discr='mSG'):
+        # mesh parameters
+        m = self.npoints - 2
+        h = self.xin[1:] - self.xin[:-1]
+        w = self.xbn[1:] - self.xbn[:-1]
+        nz = self.nz
 
-    def _fit_Sf_Sb(self, div=3):
-        assert self.ndim == 2
-        S = np.array([d['S'] for d in self.sol2d])
-
-        def sumsq(S0):
-            Sf, Sb = self._calculate_Sf_Sb(S0)
-            S_new = self._calculate_S(Sf, Sb)
-            return np.sum((S_new-S)**2)
-
-        res = optimize.minimize(sumsq, S[0]/div)
-        self.Sf, self.Sb = self._calculate_Sf_Sb(res.x)
-
-    def _calculate_G(self):
-        "Calculate net gain for every slice and store in `self.G`."
-        assert self.ndim == 2
-        # material parameters are same for all slices
-        ixa = self.ar_ix
+        ixa = self.ar_ix  # mask for active region nodes
         g0 = self.yin['g0'][ixa]
         N_tr = self.yin['N_tr'][ixa]
-        w = (self.xbn[1:] - self.xbn[:-1])[ixa[1:-1]]
         T = self.yin['wg_mode'][ixa]
+        w_ar = w[ixa[1:-1]]
+        mSf = self.Sf
+        Sf = (mSf[1:] + mSf[:-1]) / 2
+        mSb = self.Sb
+        Sb = (mSb[1:] + mSb[:-1]) / 2
+        S = Sf + Sb
 
-        # iterate over slices
-        self.G = np.zeros(self.nz)
-        for i in range(self.nz):
-            n = self.sol2d[i]['n'][ixa]
-            p = self.sol2d[i]['p'][ixa]
-            N = p.copy()
-            ixn = n < p
-            N[ixn] = n[ixn]
-            g = g0 * np.log(N / N_tr)
-            g[g < 0] = 0.0
-            alpha_fca = self._calculate_fca(self.sol2d[i]['n'],
-                                            self.sol2d[i]['p'])
-            self.G[i] = np.sum(g * T * w) - (self.alpha_i + alpha_fca)
+        data = np.zeros((11, 3*m*nz + nz*2))  # Jacobian diagonals
+        diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
 
-        # correct gain at every node by `delta_g`
-        # so that photon density is preserved after a round trip
-        xi = np.exp(2 * np.sum(self.G) * self.dz) * self.R1 * self.R2
-        if abs(xi - 1) > 1e-4:
-            print(f'Warning: round-trip gain is {xi}.')
-        delta_g = -np.log(xi) / (2 * self.L)
-        self.G += delta_g
+        rvec = np.zeros(m * 3 * nz + nz * 2)
 
-    def _calculate_Sf_Sb(self, Sf0):
-        """
-        Returns forward- and backward-propagating forward densities `Sf`
-        and `Sb` assuming `Sf[0] = Sf0`.
-        Ignores spontaneous emission.
-        """
-        assert self.ndim == 2
+        for num in range(self.nz):
+            self.sol = self.sol2d[num]
 
-        # forward propagation
-        Gdz = np.cumsum(self.G * self.dz)
-        Sf = np.zeros(self.nz + 1)
-        Sf[0] = Sf0
-        Sf[1:] = Sf[0] * np.exp(Gdz)
-        # for i in range(self.nz):
-        #     Sf[i+1] = Sf[i] * np.exp(self.G[i] * self.dz)
+            # potentials, carrier densities and their derivatives at nodes
+            psi = self.sol['psi']
+            phi_n = self.sol['phi_n']
+            phi_p = self.sol['phi_p']
+            n = self.sol['n']
+            p = self.sol['p']
+            dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
+                                 self.yin['Ec'], self.Vt)
+            dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
+                                   self.yin['Ec'], self.Vt)
+            dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'],
+                                 self.yin['Ev'], self.Vt)
+            dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
+                                   self.yin['Ev'], self.Vt)
 
-        # Sb = np.zeros(self.nz + 1)
-        # Sb[0] = Sf0 / self.R1
-        # for i in range(self.nz):
-        #     Sb[i+1] = Sb[i] / np.exp(self.G[i] * self.dz)
+            # Bernoulli function for current density calculation (m+1)
+            B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)
+            B_minus = flux.bernoulli(-(psi[1:]-psi[:-1])/self.Vt)
+            Bdot_plus = flux.bernoulli_dot(+(psi[1:]-psi[:-1])/self.Vt)
+            Bdot_minus = flux.bernoulli_dot(-(psi[1:]-psi[:-1])/self.Vt)
 
-        # back propagation
-        Gdz = np.cumsum(self.G[::-1] * self.dz)[::-1]
-        Sb = np.zeros(self.nz + 1)
-        Sb[-1] = Sf[-1] * self.R2
-        Sb[:-1] = Sb[-1] * np.exp(Gdz)
-        # for i in range(self.nz, 0, -1):
-        #     Sb[i-1] = Sb[i] * np.exp(self.G[i-1]*self.dz)
+            # current densities and their derivatives
+            if discr == 'SG':  # Scharfetter-Gummel discretization
+                jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                    self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                    self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
-        return Sf, Sb
+            elif discr == 'mSG':  # modified SG discretization
+                jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
+                    self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
+                    self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
 
-    def _transport_system_2D(self, Phi, discr):
-        J, r = self._transport_system(discr, laser=True, save_J=False,
-                                      save_Isp=False)
-        r[-1] += self.vg*(Phi + self.sol['S'] * self.alpha_m)
-        J[-1, -1] += self.vg * self.sol['S'] * self.alpha_m
-        return J, r
+            else:
+                raise Exception('Error: unknown current density '
+                                + 'discretization scheme %s.' % discr)
 
-    def lasing_step_2D(self, discr='mSG', niter=10, omega=0.1,
-                       omega_S=(1.0, 0.1)):
-        # Sf = self.Sf
-        # Sb = self.Sb
-        nz = len(self.sol2d)
-        Sf_fun = interpolate.InterpolatedUnivariateSpline(self.zbn,
-                                                          self.Sf,
-                                                          k=3)
-        Sfdot_fun = Sf_fun.derivative()
-        Sb_fun = interpolate.InterpolatedUnivariateSpline(self.zbn,
-                                                          self.Sb,
-                                                          k=3)
-        Sbdot_fun = Sb_fun.derivative()
-        Phi = Sbdot_fun(self.zin) - Sfdot_fun(self.zin)
-        # Phi = (Sb[1:] - Sb[:-1] - Sf[1:] + Sf[:-1]) / self.dz
-        # Phi = np.zeros(nz)
-        # Phi[1:-1] = (Sb[2:] - Sb[1:-1] - Sf[1:-1] + Sf[:-2]) / self.dz
-        # Phi[0] = (Sb[1] - Sb[0] - Sf[0] + Sb[0] * self.R1) / self.dz
-        # Phi[-1] = (Sf[-1] * self.R2 - Sb[-1] - Sf[-1] + Sf[-2]) / self.dz
-        m = self.npoints - 2
+            # spontaneous recombination rates (m)
+            n0 = self.yin['n0'][1:-1]
+            p0 = self.yin['p0'][1:-1]
+            tau_n = self.yin['tau_n'][1:-1]
+            tau_p = self.yin['tau_p'][1:-1]
+            B_rad = self.yin['B'][1:-1]
+            Cn = self.yin['Cn'][1:-1]
+            Cp = self.yin['Cp'][1:-1]
+            R_srh = rec.srh_R(n[1:-1], p[1:-1], n0, p0, tau_n, tau_p)
+            R_rad = rec.rad_R(n[1:-1], p[1:-1], n0, p0, B_rad)
+            R_aug = rec.auger_R(n[1:-1], p[1:-1], n0, p0, Cn, Cp)
+            R = (R_srh + R_rad + R_aug)
 
-        fluct = 0
-        for i in range(nz):
-            self.sol = self.sol2d[i]
-            for _ in range(niter):
-                J, r = self._transport_system_2D(Phi[i], discr)
-                dx = sparse.linalg.spsolve(J, -r)
-                self.sol['psi'][1:-1] += dx[:m] * omega
-                self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-                self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
-                dS = dx[-1]
-                if dS > 0:
-                    self.sol['S'] += dS * omega_S[0]
-                else:
-                    self.sol['S'] += dS * omega_S[1]
+            # recombination rates' derivatives
+            dRsrh_dpsi = rec.srh_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                      p[1:-1], dp_dpsi[1:-1],
+                                      n0, p0, tau_n, tau_p)
+            dRrad_dpsi = rec.rad_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                      p[1:-1], dp_dpsi[1:-1], B_rad)
+            dRaug_dpsi = rec.auger_Rdot(n[1:-1], dn_dpsi[1:-1],
+                                        p[1:-1], dp_dpsi[1:-1],
+                                        n0, p0, Cn, Cp)
+            dR_dpsi = dRsrh_dpsi + dRrad_dpsi + dRaug_dpsi
+            dRsrh_dphin = rec.srh_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                       n0, p0, tau_n, tau_p)
+            dRrad_dphin = rec.rad_Rdot(n[1:-1], dn_dphin[1:-1], p[1:-1], 0,
+                                       B_rad)
+            dRaug_dphin = rec.auger_Rdot(n[1:-1], dn_dphin[1:-1],
+                                         p[1:-1], 0,  n0, p0, Cn, Cp)
+            dR_dphin = dRsrh_dphin + dRrad_dphin + dRaug_dphin
+            dRsrh_dphip = rec.srh_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                       n0, p0, tau_n, tau_p)
+            dRrad_dphip = rec.rad_Rdot(n[1:-1], 0, p[1:-1], dp_dphip[1:-1],
+                                       B_rad)
+            dRaug_dphip = rec.auger_Rdot(n[1:-1], 0, p[1:-1],
+                                         dp_dphip[1:-1], n0, p0, Cn, Cp)
+            dR_dphip = dRsrh_dphip + dRrad_dphip + dRaug_dphip
 
-            x = np.hstack((self.sol['psi'][1:-1],
-                           self.sol['phi_n'][1:-1],
-                           self.sol['phi_p'][1:-1],
-                           np.array([self.sol['S']])))
-            fluct += (l2_norm(dx) / l2_norm(x)) / nz
+            # gain
+            ixn = (n[ixa] < p[ixa])
+            N = n[ixa].copy()
+            N[~ixn] = p[ixa][~ixn]
+            gain = g0 * np.log(N / N_tr)
+            ind_abs = np.where(gain < 0)
+            gain[ind_abs] = 0.0  # ignore absorption
 
-        self._fit_Sf_Sb()
-        S = self._calculate_S()
-        for i in range(self.nz):
-            self.sol2d[i]['S'] = S[i]
-        return fluct
+            # gain derivatives
+            gain_dpsi = np.zeros_like(gain)
+            gain_dpsi[ixn] = g0[ixn] * dn_dpsi[ixa][ixn] / n[ixa][ixn]
+            gain_dpsi[~ixn] = g0[~ixn] * dp_dpsi[ixa][~ixn] / p[ixa][~ixn]
+            gain_dphin = np.zeros_like(gain)
+            gain_dphin[ixn] = g0[ixn] * dn_dphin[ixa][ixn] / n[ixa][ixn]
+            gain_dphip = np.zeros_like(gain)
+            gain_dphip[~ixn] = g0[~ixn] * dp_dphip[ixa][~ixn] / p[ixa][~ixn]
+            for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
+                gdot[ind_abs] = 0  # ignore absoption
 
-    def _calculate_S(self, Sf=None, Sb=None):
-        if Sf is None or Sb is None:
-            assert self.ndim == 2
-            Sf = self.Sf
-            Sb = self.Sb
-        S_calc = Sf + Sb
-        f = interpolate.InterpolatedUnivariateSpline(self.zbn,
-                                                    S_calc,
-                                                    k=3)
-        S = f(self.zin)
-        # S = (S_calc[1:] + S_calc[:-1]) / 2
-        return S
-        # for i in range(self.nz):
-        #     self.sol2d[i]['S'] = (S_calc[i] + S_calc[i+1]) / 2
+            # net gain
+            alpha_fca = self._calculate_fca()
+            alpha = self.alpha_i + alpha_fca
+            net_gain = np.sum(gain * w_ar * T) - alpha
+
+            # stimulated recombination rate
+            R_st = self.vg * gain * w_ar * T * S[num]
+            # dRst_dS = self.vg * gain * w_ar * T
+            dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S[num]
+            dRst_dphin = self.vg * gain_dphin * w_ar * T * S[num]
+            dRst_dphip = self.vg * gain_dphip * w_ar * T * S[num]
+
+            # residual
+            rj = rvec[(3*m*num):(3*m*(num+1))]
+            rj[0:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
+                                      self.eps_0, self.q, self.yin['C_dop'])
+            rj[m:2*m] = self.q*R*w - (jn[1:]-jn[:-1])
+            rj[m:2*m][ixa[1:-1]] += self.q * R_st
+            rj[2*m:3*m] = -self.q*R*w - (jp[1:]-jp[:-1])
+            rj[2*m:3*m][ixa[1:-1]] -= self.q * R_st
+            R_rad_ar = np.sum(R_rad[ixa[1:-1]]*w_ar*T) / 2
+            rvec[3*m*nz + num] = \
+                (self.vg*(mSb[num+1] - mSb[num]) / self.dz
+                 + self.vg * net_gain * Sb[num]
+                 + self.beta_sp * R_rad_ar)
+            rvec[3*m*nz + nz + num] = \
+                (-self.vg*(mSb[num+1] - mSb[num]) / self.dz
+                 + self.vg * net_gain * Sf[num]
+                 + self.beta_sp * R_rad_ar)
+
+            # TODO: assemble Jacobian
+
+        return rvec
 
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     from sample_design import sd
+
+    plt.rcdefaults()
+    plt.rc('lines', linewidth=0.8)
 
     # initialize problem
     ld = LaserDiode2D(design=sd, ar_inds=3,
@@ -243,26 +268,27 @@ if __name__ == '__main__':
     # convert to 2D and perform one iteration along longitudinal axis
     S_1D = ld.sol['S']
     ld.to_2D(10)
+    ld.original_units()
 
-    n_iter = 1000
-    S0 = np.array([d['S'] for d in ld.sol2d])
-    flucts = np.zeros(n_iter)
-    S_vals = np.zeros(n_iter)
-    for i in range(n_iter):
-        fluct = ld.lasing_step_2D(omega=0.5, omega_S=(0.5, 0.5), niter=10)
-        flucts[i] = fluct
-        S_vals[i] = ld.sol2d[-1]['S']
-        print(i, flucts[i], S_vals[i])
-    S1 = np.array([d['S'] for d in ld.sol2d])
+    plt.figure('Photon density distribution')
+    plt.plot(ld.zbn*1e4, ld.Sf, 'b:|', label='$S_f$')
+    plt.plot(ld.zbn*1e4, ld.Sb, 'r:|', label='$S_b$')
+    plt.xlabel(r'$z$ ($\mu$m)')
+    plt.ylabel('$S$ (cm$^{-2}$)')
+    plt.legend()
 
-    plt.figure()
-    plt.plot(S0)
-    plt.plot(S1)
+    plt.figure('Band diagram')
+    x = ld.xin * 1e4
+    for i, color in zip((0, 9), 'br'):
+        psi = ld.sol2d[i]['psi']
+        phi_n = ld.sol2d[i]['phi_n']
+        phi_p = ld.sol2d[i]['phi_p']
+        plt.plot(x, ld.yin['Ec']-psi, color=color, ls='-')
+        plt.plot(x, ld.yin['Ev']-psi, color=color, ls='-')
+        plt.plot(x, -phi_n, color=color, ls=':')
+        plt.plot(x, -phi_p, color=color, ls=':')
+    plt.xlabel(r'$x$ ($\mu$m)')
+    plt.ylabel('$E$ (eV)')
 
-    plt.figure()
-    plt.semilogy(np.arange(1, n_iter+1), flucts, color='b')
-    plt.xlabel('Iteration number')
-    plt.ylabel('Fluctuation', color='b')
-    plt.twinx()
-    plt.plot(np.arange(1, n_iter+1), S_vals, color='r')
-    plt.ylabel('Photon density', color='r')
+    ld.make_dimensionless()
+    r = ld._transport_system_2D('mSG')
