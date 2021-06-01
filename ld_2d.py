@@ -83,6 +83,8 @@ class LaserDiode2D(LaserDiode1D):
         nz = self.nz
 
         ixa = self.ar_ix  # mask for active region nodes
+        inds_a = np.where(ixa)[0]
+        nxa = np.sum(ixa)
         g0 = self.yin['g0'][ixa]
         N_tr = self.yin['N_tr'][ixa]
         T = self.yin['wg_mode'][ixa]
@@ -93,10 +95,14 @@ class LaserDiode2D(LaserDiode1D):
         Sb = (mSb[1:] + mSb[:-1]) / 2
         S = Sf + Sb
 
-        data = np.zeros((11, 3*m*nz + nz*2))  # Jacobian diagonals
+        # Jacobian
+        data = np.zeros((11, 3*m*nz + nz*2))  # transport diagonals
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
+        J4_13 = np.zeros((2, nxa * 3 * nz))   # bottom rows
+        J24 = np.zeros((nxa*3) * nz)          # dF2 / dS
+        J44 = np.zeros((nz * 2, nz * 2))      # dF4 / dS
 
-        rvec = np.zeros(m * 3 * nz + nz * 2)
+        rvec = np.zeros(m * 3 * nz + nz * 2)  # vector of residuals
 
         for num in range(self.nz):
             self.sol = self.sol2d[num]
@@ -182,8 +188,8 @@ class LaserDiode2D(LaserDiode1D):
             N = n[ixa].copy()
             N[~ixn] = p[ixa][~ixn]
             gain = g0 * np.log(N / N_tr)
-            ind_abs = np.where(gain < 0)
-            gain[ind_abs] = 0.0  # ignore absorption
+            ix_abs = np.where(gain < 0)
+            gain[ix_abs] = 0.0  # ignore absorption
 
             # gain derivatives
             gain_dpsi = np.zeros_like(gain)
@@ -194,7 +200,7 @@ class LaserDiode2D(LaserDiode1D):
             gain_dphip = np.zeros_like(gain)
             gain_dphip[~ixn] = g0[~ixn] * dp_dphip[ixa][~ixn] / p[ixa][~ixn]
             for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
-                gdot[ind_abs] = 0  # ignore absoption
+                gdot[ix_abs] = 0  # ignore absoption
 
             # net gain
             alpha_fca = self._calculate_fca()
@@ -203,7 +209,7 @@ class LaserDiode2D(LaserDiode1D):
 
             # stimulated recombination rate
             R_st = self.vg * gain * w_ar * T * S[num]
-            # dRst_dS = self.vg * gain * w_ar * T
+            dRst_dS = self.vg * gain * w_ar * T / 2
             dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S[num]
             dRst_dphin = self.vg * gain_dphin * w_ar * T * S[num]
             dRst_dphip = self.vg * gain_dphip * w_ar * T * S[num]
@@ -226,9 +232,109 @@ class LaserDiode2D(LaserDiode1D):
                  + self.vg * net_gain * Sf[num]
                  + self.beta_sp * R_rad_ar)
 
-            # TODO: assemble Jacobian
+            # Jacobian
+            # 1. Poisson's equation
+            j11 = vrs.poisson_dF_dpsi(dn_dpsi, dp_dpsi, h, w,
+                                      self.yin['eps'], self.eps_0, self.q)
+            j12 = vrs.poisson_dF_dphin(dn_dphin, w, self.eps_0, self.q)
+            j13 = vrs.poisson_dF_dphip(dp_dphip, w, self.eps_0, self.q)
 
-        return rvec
+            # 2. Electron current continuity equation
+            j21 = vrs.jn_dF_dpsi(djn_dpsi1, djn_dpsi2, dR_dpsi, w,
+                                 self.q, m)
+            j21[1, ixa[1:-1]] += self.q * dRst_dpsi
+            j22 = vrs.jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin,
+                                  w, self.q, m)
+            j22[1, ixa[1:-1]] += self.q * dRst_dphin
+            j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
+            j23[ixa[1:-1]] += self.q * dRst_dphip
+            J24[num*nxa:(num+1)*nxa] = self.q * dRst_dS
+
+            # 3. Hole current continuity equation
+            j31 = vrs.jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi,
+                                 w, self.q, m)
+            j31[1, ixa[1:-1]] -= self.q * dRst_dpsi
+            j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
+            j32[ixa[1:-1]] -= self.q * dRst_dphin
+            j33 = vrs.jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip,
+                                  w, self.q, m)
+            j33[1, ixa[1:-1]] -= self.q * dRst_dphip
+            # dF3/dS = -dF2/dS
+
+            # 4. Rate equations for densities of backward-
+            # and forward-propagating photons
+            J413_j = J4_13[:, num*nxa*3:(num+1)*nxa*3]
+            J413_j[0, :nxa] = \
+                (self.beta_sp * dRrad_dpsi[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dpsi * w_ar * T * Sb[num])
+            J413_j[1, :nxa] = \
+                (self.beta_sp * dRrad_dpsi[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dpsi * w_ar * T * Sf[num])
+            J413_j[0, nxa:2*nxa] = \
+                (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dphin * w_ar * T * Sb[num])
+            J413_j[1, nxa:2*nxa] = \
+                (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dphin * w_ar * T * Sf[num])
+            J413_j[0, 2*nxa:3*nxa] = \
+                (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dphin * w_ar * T * Sb[num])
+            J4_13[1, 2*nxa:3*nxa] = \
+                (self.beta_sp * dRrad_dphip[ixa[1:-1]] * w_ar * T
+                 + self.vg * gain_dphip * w_ar * T * Sf[num])
+
+            # collect Jacobian diagonals
+            data_j = data[:, (3*m*num):(3*m*(num+1))]
+            data_j[0, 2*m:   ] = j13
+            data_j[1,   m:2*m] = j12
+            data_j[1, 2*m:   ] = j23
+            data_j[2,    :m  ] = j11[0]
+            data_j[2,   m:2*m] = j22[0]
+            data_j[2, 2*m:   ] = j33[0]
+            data_j[3,    :m  ] = j11[1]
+            data_j[3,   m:2*m] = j22[1]
+            data_j[3, 2*m:   ] = j33[1]
+            data_j[4,    :m  ] = j11[2]
+            data_j[4,   m:2*m] = j22[2]
+            data_j[4, 2*m:   ] = j33[2]
+            data_j[5,    :m  ] = j21[0]
+            data_j[6,    :m  ] = j21[1]
+            data_j[6,   m:2*m] = j32
+            data_j[7,    :m  ] = j21[2]
+            data_j[8,    :m  ] = j31[0]
+            data_j[9,    :m  ] = j31[1]
+            data_j[10,   :m  ] = j31[2]
+
+        J = sparse.spdiags(data, diags, format='lil',
+                           m=(3*m)*nz + nz*2, n=(3*m)*nz + nz*2)
+
+        # rightmost columns, first slice
+        J[m + inds_a, 3*m*nz] = J24[:nxa] * (1 + self.R1)
+        J[2*m + inds_a, 3*m*nz] = -J24[:nxa] * (1 + self.R1)
+        J[m + inds_a, 3*m*nz + 1] = J24[:nxa]
+        J[2*m + inds_a, 3*m*nz + 1] = -J24[:nxa]
+        J[m + inds_a, 3*m*nz + nz] = J24[:nxa]
+        J[2*m + inds_a, 3*m*nz + nz] = -J24[:nxa]
+
+        # rightmost columns, inner slices
+        for num in range(1, nz-1):
+            q_Rstdot = J24[nxa*num:nxa*(num+1)]  # q*dRst/dSb
+            for k in [0, 1, nz-1, nz]:
+                J[num*m*3 + m + inds_a, 3*m*nz + num+k] = q_Rstdot
+                J[num*m*3 + 2*m + inds_a, 3*m*nz + num+k] = -q_Rstdot
+
+        # rightmost columns, last slice
+        J[(nz-1)*3*m + m + inds_a, 3*m*nz + nz] = J24[-nxa:]
+        J[(nz-1)*3*m + 2*m + inds_a, 3*m*nz + nz] = -J24[-nxa:]
+        J[(nz-1)*3*m + m + inds_a, -2] = J24[-nxa:]
+        J[(nz-1)*3*m + 2*m + inds_a, -2] = -J24[-nxa:]
+        J[(nz-1)*3*m + m + inds_a, -1] = J24[-nxa:] * (1 + self.R2)
+        J[(nz-1)*3*m + 2*m + inds_a, -1] = -J24[-nxa:] * (1 + self.R2)
+
+        # TODO: complete Jacobian
+        J = J.tocsc()
+
+        return J, rvec
 
 
 if __name__ == '__main__':
@@ -291,4 +397,4 @@ if __name__ == '__main__':
     plt.ylabel('$E$ (eV)')
 
     ld.make_dimensionless()
-    r = ld._transport_system_2D('mSG')
+    J, r = ld._transport_system_2D('mSG')
