@@ -32,6 +32,7 @@ I_values = np.zeros_like(voltages)
 Isrh_values = np.zeros_like(voltages)
 Irad_values = np.zeros_like(voltages)
 Iaug_values = np.zeros_like(voltages)
+fca_values = np.zeros_like(voltages)
 P_values = np.zeros_like(voltages)
 print('Voltage Iterations Power')
 
@@ -65,6 +66,8 @@ for i, v in enumerate(voltages):
     Isrh_values[i] = ld.sol['I_srh'] * (units.j * units.x**2)
     Irad_values[i] = ld.sol['I_rad'] * (units.j * units.x**2)
     Iaug_values[i] = ld.sol['I_aug'] * (units.j * units.x**2)
+    # free-carrier absorption
+    fca_values[i] = ld._calculate_fca() * (1 / units.x)
 
     # save current band diagram and display progress
     if export:
@@ -121,10 +124,10 @@ plt.ylabel('$P$ (W)')
 # export arrays with simulation results
 if export:
     with open(export_folder + '/' + 'LIV.csv', 'w') as f:
-        f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug')))
+        f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug', 'FCA')))
         for i in range(len(voltages)):
             f.write('\n')
             vals = map(str, (voltages[i], j_values[i], I_values[i],
-                            P_values[i], Isrh_values[i], Irad_values[i],
-                            Iaug_values[i]))
+                             P_values[i], Isrh_values[i], Irad_values[i],
+                             Iaug_values[i], fca_values[i]))
             f.write(','.join(vals))
