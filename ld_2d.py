@@ -99,7 +99,7 @@ class LaserDiode2D(LaserDiode1D):
         data = np.zeros((11, 3*m*nz + nz*2))  # transport diagonals
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
         J4_13 = np.zeros((2, nxa * 3 * nz))   # bottom rows
-        J24 = np.zeros((nxa*3) * nz)          # dF2 / dS
+        J24 = np.zeros(nxa * nz)          # dF2 / dS
         J44 = np.zeros((nz * 2, nz * 2))      # dF4 / dS
 
         rvec = np.zeros(m * 3 * nz + nz * 2)  # vector of residuals
@@ -228,7 +228,7 @@ class LaserDiode2D(LaserDiode1D):
                  + self.vg * net_gain * Sb[num]
                  + self.beta_sp * R_rad_ar)
             rvec[3*m*nz + nz + num] = \
-                (-self.vg*(mSb[num+1] - mSb[num]) / self.dz
+                (-self.vg*(mSf[num+1] - mSf[num]) / self.dz
                  + self.vg * net_gain * Sf[num]
                  + self.beta_sp * R_rad_ar)
 
@@ -278,10 +278,26 @@ class LaserDiode2D(LaserDiode1D):
                  + self.vg * gain_dphin * w_ar * T * Sf[num])
             J413_j[0, 2*nxa:3*nxa] = \
                 (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
-                 + self.vg * gain_dphin * w_ar * T * Sb[num])
-            J4_13[1, 2*nxa:3*nxa] = \
+                 + self.vg * gain_dphip * w_ar * T * Sb[num])
+            J413_j[1, 2*nxa:3*nxa] = \
                 (self.beta_sp * dRrad_dphip[ixa[1:-1]] * w_ar * T
                  + self.vg * gain_dphip * w_ar * T * Sf[num])
+
+            J44[num, num] = self.vg * (-1 / self.dz + net_gain / 2)
+            if num < nz - 1:
+                J44[num, num+1] = self.vg * (1 / self.dz + net_gain / 2)
+            else:
+                J44[nz-1, -1] = self.vg * self.R2 * (1 / self.dz
+                                                   + net_gain / 2)
+
+            J44[nz + num, nz + num] = self.vg * (-1 / self.dz
+                                                 + net_gain / 2)
+            if num > 0:
+                J44[nz + num, nz + num-1] = self.vg * (1 / self.dz
+                                                       + net_gain / 2)
+            else:
+                J44[nz, 0] = self.vg * self.R1 * (1 / self.dz
+                                                  + net_gain / 2)
 
             # collect Jacobian diagonals
             data_j = data[:, (3*m*num):(3*m*(num+1))]
@@ -305,6 +321,7 @@ class LaserDiode2D(LaserDiode1D):
             data_j[9,    :m  ] = j31[1]
             data_j[10,   :m  ] = j31[2]
 
+        # assemble Jacobian
         J = sparse.spdiags(data, diags, format='lil',
                            m=(3*m)*nz + nz*2, n=(3*m)*nz + nz*2)
 
@@ -324,17 +341,54 @@ class LaserDiode2D(LaserDiode1D):
                 J[num*m*3 + 2*m + inds_a, 3*m*nz + num+k] = -q_Rstdot
 
         # rightmost columns, last slice
-        J[(nz-1)*3*m + m + inds_a, 3*m*nz + nz] = J24[-nxa:]
-        J[(nz-1)*3*m + 2*m + inds_a, 3*m*nz + nz] = -J24[-nxa:]
+        J[(nz-1)*3*m + m + inds_a, 3*m*nz + nz-1] = J24[-nxa:]
+        J[(nz-1)*3*m + 2*m + inds_a, 3*m*nz + nz-1] = -J24[-nxa:]
         J[(nz-1)*3*m + m + inds_a, -2] = J24[-nxa:]
         J[(nz-1)*3*m + 2*m + inds_a, -2] = -J24[-nxa:]
         J[(nz-1)*3*m + m + inds_a, -1] = J24[-nxa:] * (1 + self.R2)
         J[(nz-1)*3*m + 2*m + inds_a, -1] = -J24[-nxa:] * (1 + self.R2)
 
-        # TODO: complete Jacobian
+        # bottom rows
+        for num in range(nz):
+            for k in range(3):
+                J[3*m*nz + num, num*(3*m) + k*m + inds_a] = \
+                    J4_13[0, num*(3*nxa) + k*nxa:num*(3*nxa) + (k+1)*nxa]
+                J[3*m*nz + nz + num, num*(3*m) + k*m + inds_a] = \
+                    J4_13[1, num*(3*nxa) + k*nxa:num*(3*nxa) + (k+1)*nxa]
+
+        J[nz*(3*m):, nz*(3*m):] = J44
         J = J.tocsc()
 
+        self.sol = dict()
+
         return J, rvec
+
+    def lasing_step_2D(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
+        J, r = self._transport_system_2D(discr)
+        dx = sparse.linalg.spsolve(J, -r)
+        m = self.npoints - 2
+        for j, sol in enumerate(self.sol2d):
+            dx_j = dx[3*m*j:3*m*(j+1)]
+            sol['psi'][1:-1] += omega * dx_j[:m]
+            sol['phi_n'][1:-1] += omega * dx_j[m:2*m]
+            sol['phi_p'][1:-1] += omega * dx_j[2*m:3*m]
+            sol['n'] = cc.n(sol['psi'], sol['phi_n'],
+                            self.yin['Nc'], self.yin['Ec'], self.Vt)
+            sol['p'] = cc.p(sol['psi'], sol['phi_p'],
+                            self.yin['Nv'], self.yin['Ev'], self.Vt)
+        delta_Sb = dx[-2*self.nz:-self.nz]
+        ixb = delta_Sb > 0
+        delta_Sf = dx[-self.nz:]
+        ixf = delta_Sf > 0
+
+        self.Sb[:-1][ixb] += omega_S[0] * delta_Sb[ixb]
+        self.Sb[:-1][~ixb] += omega_S[1] * delta_Sb[~ixb]
+        self.Sf[0] = self.Sb[0] * self.R1
+        self.Sf[1:][ixf] += omega_S[0] * delta_Sf[ixf]
+        self.Sf[1:][~ixf] += omega_S[1] * delta_Sf[~ixf]
+        self.Sb[-1] = self.Sf[-1] * self.R2
+
+        return dx
 
 
 if __name__ == '__main__':
@@ -358,7 +412,7 @@ if __name__ == '__main__':
     # solve 1D problem until there is significant photon density
     V = 0.0
     dV = 0.1
-    while ld.sol['S'] < 1.0:
+    while ld.sol['S'] < 1:
         print(V, end=', ')
         ld.lasing_init(V)
         fluct = 1.0
@@ -371,30 +425,51 @@ if __name__ == '__main__':
         print(ld.iterations)
         V += dV
 
-    # convert to 2D and perform one iteration along longitudinal axis
+    # convert to 2D
     S_1D = ld.sol['S']
     ld.to_2D(10)
     ld.original_units()
 
-    plt.figure('Photon density distribution')
-    plt.plot(ld.zbn*1e4, ld.Sf, 'b:|', label='$S_f$')
-    plt.plot(ld.zbn*1e4, ld.Sb, 'r:|', label='$S_b$')
+    # plot initial (constant) S(z) curve
+    plt.figure(1)
+    plt.plot(ld.zbn*1e4, ld.Sf+ld.Sb, 'k:.', label='$S_{1D}$')
     plt.xlabel(r'$z$ ($\mu$m)')
     plt.ylabel('$S$ (cm$^{-2}$)')
-    plt.legend()
 
-    plt.figure('Band diagram')
+    # plot band diagram
+    plt.figure(2)
     x = ld.xin * 1e4
-    for i, color in zip((0, 9), 'br'):
-        psi = ld.sol2d[i]['psi']
-        phi_n = ld.sol2d[i]['phi_n']
-        phi_p = ld.sol2d[i]['phi_p']
-        plt.plot(x, ld.yin['Ec']-psi, color=color, ls='-')
-        plt.plot(x, ld.yin['Ev']-psi, color=color, ls='-')
-        plt.plot(x, -phi_n, color=color, ls=':')
-        plt.plot(x, -phi_p, color=color, ls=':')
+    c = 'k'
+    plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color=c, ls='-', label='1D')
+    plt.plot(x, ld.yin['Ev']-ld.sol['psi'], color=c, ls='-')
+    plt.plot(x, -ld.sol['phi_n'], color=c, ls=':')
+    plt.plot(x, -ld.sol['phi_p'], color=c, ls=':')
     plt.xlabel(r'$x$ ($\mu$m)')
     plt.ylabel('$E$ (eV)')
 
+    # solve 2D problem
     ld.make_dimensionless()
-    J, r = ld._transport_system_2D('mSG')
+    print('Solving 2D problem...')
+    n_iter = 20
+    for i in range(n_iter):
+        dx = ld.lasing_step_2D(1.0, (1.0, 1.0))
+        print(f'{i+1} / {n_iter}')
+    ld.original_units()
+
+    # plot calculated photon density distributions
+    plt.figure(1)
+    plt.plot(ld.zbn*1e4, ld.Sf, 'b-x', label='$S_f$')
+    plt.plot(ld.zbn*1e4, ld.Sb, 'r-x', label='$S_b$')
+    plt.plot(ld.zbn*1e4, ld.Sf+ld.Sb, 'k-x', label='$S_{2D}$')
+    plt.legend()
+
+    # plot band diagrams at the opposite laser edges
+    plt.figure(2)
+    labels = ['2D, $z = 0$', '2D, $z = L$']
+    for j, c, label in zip([0, 9], ['b', 'r'], labels):
+        psi = ld.sol2d[j]['psi']
+        plt.plot(x, ld.yin['Ec']-psi, color=c, ls='-', label=label)
+        plt.plot(x, ld.yin['Ev']-psi, color=c, ls='-')
+        plt.plot(x, -ld.sol2d[j]['phi_n'], color=c, ls=':')
+        plt.plot(x, -ld.sol2d[j]['phi_p'], color=c, ls=':')
+        plt.legend()
