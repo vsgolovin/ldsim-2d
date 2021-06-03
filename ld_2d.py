@@ -11,6 +11,7 @@ import carrier_concentrations as cc
 import flux
 import recombination as rec
 import vrs
+from newton import l2_norm
 
 
 class LaserDiode2D(LaserDiode1D):
@@ -356,16 +357,74 @@ class LaserDiode2D(LaserDiode1D):
                 J[3*m*nz + nz + num, num*(3*m) + k*m + inds_a] = \
                     J4_13[1, num*(3*nxa) + k*nxa:num*(3*nxa) + (k+1)*nxa]
 
+        # bottom right corner
         J[nz*(3*m):, nz*(3*m):] = J44
-        J = J.tocsc()
 
-        self.sol = dict()
+        J = J.tocsc()  # for scipy.sparse.spsolve
+        self.sol = dict()  # needed so that scaling is not performed twice
 
         return J, rvec
 
+    def lasing_init_2D(self, voltage):
+        "Initialize 2D laser drift-diffusion problem."
+        # track convergence
+        self.iterations = 0
+        self.fluct = list()
+
+        # scale voltage
+        if self.is_dimensionless:
+            voltage /= units.V
+
+        # apply BCs
+        V_0 = self.yin['psi_bi'][0] - voltage / 2
+        V_L = self.yin['psi_bi'][-1] + voltage / 2
+        assert self.ndim == 2
+        for sol in self.sol2d:
+            sol['psi'][0] = V_0
+            sol['psi'][-1] = V_L
+            sol['phi_n'][0] = -voltage / 2
+            sol['phi_n'][-1] = voltage / 2
+            sol['phi_p'][0] = -voltage / 2
+            sol['phi_p'][-1] = voltage / 2
+
     def lasing_step_2D(self, omega=0.1, omega_S=(1.0, 0.1), discr='mSG'):
+        """
+        Perform a single Newton step for a 2D laser problem.
+
+        Parameters
+        ----------
+        omega : float
+            Damping parameter for potentials.
+        omega_S : (float, float)
+            Dampling parameter for photon density `S`. First value is used
+            for increasing `S`, second -- for decreasing `S`.
+        discr : str
+            Current density discretization scheme.
+
+        Returns
+        -------
+        fluct : float
+            Solution fluctuation, i.e. the ratio between update vector and
+            solution vector L2 norms.
+
+        """
+        # solve the system
         J, r = self._transport_system_2D(discr)
         dx = sparse.linalg.spsolve(J, -r)
+
+        # calculate fluctuation
+        m = self.npoints - 2
+        x = np.empty(3 * m * self.nz + 2 * self.nz)
+        for j, sol in enumerate(self.sol2d):
+            xj = x[3*m*j:3*m*(j+1)]
+            xj[:m] = sol['psi'][1:-1]
+            xj[m:2*m] = sol['phi_n'][1:-1]
+            xj[2*m:] = sol['phi_p'][1:-1]
+        x[-2*self.nz:-1*self.nz] = self.Sb[:-1]
+        x[-self.nz:] = self.Sf[1:]
+        fluct = l2_norm(dx) / l2_norm(x)
+
+        # update solution
         m = self.npoints - 2
         for j, sol in enumerate(self.sol2d):
             dx_j = dx[3*m*j:3*m*(j+1)]
@@ -380,7 +439,6 @@ class LaserDiode2D(LaserDiode1D):
         ixb = delta_Sb > 0
         delta_Sf = dx[-self.nz:]
         ixf = delta_Sf > 0
-
         self.Sb[:-1][ixb] += omega_S[0] * delta_Sb[ixb]
         self.Sb[:-1][~ixb] += omega_S[1] * delta_Sb[~ixb]
         self.Sf[0] = self.Sb[0] * self.R1
@@ -388,7 +446,11 @@ class LaserDiode2D(LaserDiode1D):
         self.Sf[1:][~ixf] += omega_S[1] * delta_Sf[~ixf]
         self.Sb[-1] = self.Sf[-1] * self.R2
 
-        return dx
+        # track convergence
+        self.fluct.append(fluct)
+        self.iterations += 1
+
+        return fluct
 
 
 if __name__ == '__main__':
@@ -413,7 +475,6 @@ if __name__ == '__main__':
     V = 0.0
     dV = 0.1
     while ld.sol['S'] < 1:
-        print(V, end=', ')
         ld.lasing_init(V)
         fluct = 1.0
         while fluct > 1e-8:
@@ -422,54 +483,81 @@ if __name__ == '__main__':
             else:
                 omega = 0.2
             fluct = ld.lasing_step(omega, (1., omega))
-        print(ld.iterations)
+        print(f'{V:.1f} V, {ld.iterations} iterations')
         V += dV
 
     # convert to 2D
-    S_1D = ld.sol['S']
     ld.to_2D(10)
     ld.original_units()
 
-    # plot initial (constant) S(z) curve
+    # plot initial (constant) distributions of
+    # 1. photon density
     plt.figure(1)
     plt.plot(ld.zbn*1e4, ld.Sf+ld.Sb, 'k:.', label='$S_{1D}$')
+    plt.xlim(-25, ld.L*1e4+25)
     plt.xlabel(r'$z$ ($\mu$m)')
     plt.ylabel('$S$ (cm$^{-2}$)')
 
-    # plot band diagram
+    # 2. free electron and hole density in the active region
+    n_1D = np.array([d['n'][ld.ar_ix].mean() for d in ld.sol2d])
+    p_1D = np.array([d['p'][ld.ar_ix].mean() for d in ld.sol2d])
     plt.figure(2)
-    x = ld.xin * 1e4
-    c = 'k'
-    plt.plot(x, ld.yin['Ec']-ld.sol['psi'], color=c, ls='-', label='1D')
-    plt.plot(x, ld.yin['Ev']-ld.sol['psi'], color=c, ls='-')
-    plt.plot(x, -ld.sol['phi_n'], color=c, ls=':')
-    plt.plot(x, -ld.sol['phi_p'], color=c, ls=':')
-    plt.xlabel(r'$x$ ($\mu$m)')
-    plt.ylabel('$E$ (eV)')
+    plt.plot(ld.zin*1e4, n_1D, 'b:.', label='$n_{1D}$')
+    plt.plot(ld.zin*1e4, p_1D, 'r:.', label='$p_{1D}$')
+    plt.xlim(-25, ld.L*1e4+25)
+    plt.xlabel(r'$z$ ($\mu$m)')
+    plt.ylabel('$n$, $p$ (cm$^{-3}$)')
 
     # solve 2D problem
     ld.make_dimensionless()
     print('Solving 2D problem...')
     n_iter = 20
     for i in range(n_iter):
-        dx = ld.lasing_step_2D(1.0, (1.0, 1.0))
-        print(f'{i+1} / {n_iter}')
+        fluct = ld.lasing_step_2D(1.0, (1.0, 1.0))
+        print(f'{i+1} / {n_iter}, {fluct}')
     ld.original_units()
 
-    # plot calculated photon density distributions
+    # plot 2D solution
     plt.figure(1)
     plt.plot(ld.zbn*1e4, ld.Sf, 'b-x', label='$S_f$')
     plt.plot(ld.zbn*1e4, ld.Sb, 'r-x', label='$S_b$')
     plt.plot(ld.zbn*1e4, ld.Sf+ld.Sb, 'k-x', label='$S_{2D}$')
     plt.legend()
 
-    # plot band diagrams at the opposite laser edges
+    n_2D = np.array([d['n'][ld.ar_ix].mean() for d in ld.sol2d])
+    p_2D = np.array([d['p'][ld.ar_ix].mean() for d in ld.sol2d])
     plt.figure(2)
-    labels = ['2D, $z = 0$', '2D, $z = L$']
-    for j, c, label in zip([0, 9], ['b', 'r'], labels):
-        psi = ld.sol2d[j]['psi']
-        plt.plot(x, ld.yin['Ec']-psi, color=c, ls='-', label=label)
-        plt.plot(x, ld.yin['Ev']-psi, color=c, ls='-')
-        plt.plot(x, -ld.sol2d[j]['phi_n'], color=c, ls=':')
-        plt.plot(x, -ld.sol2d[j]['phi_p'], color=c, ls=':')
-        plt.legend()
+    plt.plot(ld.zin*1e4, n_2D, 'b-x', label='$n_{2D}$')
+    plt.plot(ld.zin*1e4, p_2D, 'r-x', label='$p_{2D}$')
+    plt.legend()
+
+    # increase external voltage and solve 2D system
+    V += dV
+    print(f'Applying {V:.1f} V')
+    ld.make_dimensionless()
+    ld.lasing_init_2D(V)
+    n_iter_2 = 200
+    for i in range(n_iter_2):
+        fluct = ld.lasing_step_2D(0.2, (0.2, 0.2))
+        print(f'{i+1} / {n_iter_2}, {fluct}')
+    ld.original_units()
+
+    # plot photon and free carrier density distributions
+    n_2D2 = np.array([d['n'][ld.ar_ix].mean() for d in ld.sol2d])
+    p_2D2 = np.array([d['p'][ld.ar_ix].mean() for d in ld.sol2d])
+    plt.figure(3)
+    line_S, = plt.plot(ld.zbn*1e4, ld.Sb + ld.Sf, 'k-|', label='$S(z)$')
+    plt.xlim(-25, ld.L*1e4+25)
+    plt.xlabel(r'$z$ ($\mu$m)')
+    plt.ylabel('$S$ (cm$^{-2}$)')
+    plt.twinx()
+    line_n, = plt.plot(ld.zin*1e4, n_2D2, 'b:.', label='$n(z)$')
+    line_p, = plt.plot(ld.zin*1e4, p_2D2, 'r:.', label='$p(z)$')
+    plt.legend(handles=[line_S, line_n, line_p], loc='upper center')
+    plt.ylabel('$n$, $p$ (cm$^{-3}$)')
+
+    # plot convergence
+    plt.figure(4)
+    plt.semilogy(ld.fluct, 'b-')
+    plt.ylabel('Fluctuation')
+    plt.xlabel('Iteration number')
