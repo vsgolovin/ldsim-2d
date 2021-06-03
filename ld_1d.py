@@ -279,11 +279,11 @@ class LaserDiode1D(object):
 
         # arrays
         for key in self.yin:
-            self.yin[key] /= unit_values[key]
+            self.yin[key] /= units.dct[key]
         for key in self.ybn:
-            self.ybn[key] /= unit_values[key]
+            self.ybn[key] /= units.dct[key]
         for key in self.sol:
-            self.sol[key] /= unit_values[key]
+            self.sol[key] /= units.dct[key]
 
         self.is_dimensionless = True
 
@@ -314,11 +314,11 @@ class LaserDiode1D(object):
 
         # arrays
         for key in self.yin:
-            self.yin[key] *= unit_values[key]
+            self.yin[key] *= units.dct[key]
         for key in self.ybn:
-            self.ybn[key] *= unit_values[key]
+            self.ybn[key] *= units.dct[key]
         for key in self.sol:
-            self.sol[key] *= unit_values[key]
+            self.sol[key] *= units.dct[key]
 
         self.is_dimensionless = False
 
@@ -521,12 +521,18 @@ class LaserDiode1D(object):
         self.sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
                              self.yin['Nv'], self.yin['Ev'], self.Vt)
 
-    def _calculate_fca(self):
+    def _calculate_fca(self, n=None, p=None):
         "Calculate free-carrier absorption."
         T = self.yin['wg_mode'][1:-1]
         w = self.xbn[1:] - self.xbn[:-1]
-        n = self.sol['n'][1:-1]
-        p = self.sol['p'][1:-1]
+        if n is None:
+            n = self.sol['n'][1:-1]
+        else:
+            n = n[1:-1]
+        if p is None:
+            p = self.sol['p'][1:-1]
+        else:
+            p = p[1:-1]
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
 
@@ -1204,7 +1210,7 @@ if __name__ == '__main__':
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
-    ld.transport_init(0.1)
+    ld.lasing_init(0.1)
     for _ in range(nsteps):
         ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
     print('Complete.')
