@@ -6,6 +6,7 @@ Can also solve 2D vertical-longitudinal (x-z) problem, in which a set of
 identical vertical slices are connected via stimulated emission.
 """
 
+from re import S
 import warnings
 import os
 import numpy as np
@@ -113,7 +114,7 @@ class LaserDiode(object):
         self.sol2d = list()          # solution at every slice
         self.ndim = 1                # initialize as 1D
         # densities of forward-and backward-propagating photons
-        self.Sf = np.repeat(self.sol['S'] / 2)
+        self.Sf = np.repeat(self.sol['S'] / 2, self.mz + 1)
         self.Sb = self.Sf
 
         self.gen_uniform_mesh(calc_params=False)
@@ -583,8 +584,8 @@ class LaserDiode(object):
 
         # apply boundary conditions
         for sol in solutions:
-            sol['psi'][0] = self.yin['psi_eq'][0] - V / 2
-            sol['psi'][-1] = self.yin['psi_eq'][-1] + V / 2
+            sol['psi'][0] = self.yin['psi_bi'][0] - V / 2
+            sol['psi'][-1] = self.yin['psi_bi'][-1] + V / 2
             for phi in ('phi_n', 'phi_p'):
                 sol[phi][0] = -V / 2
                 sol[phi][-1] = V / 2
@@ -623,9 +624,9 @@ class LaserDiode(object):
         dx = sparse.linalg.spsolve(J, -rvec)
 
         # calculate and save fluctuation
-        x = np.hstack((self.sol['psi'][1:-1],
-                       self.sol['phi_n'][1:-1],
-                       self.sol['phi_p'][1:-1]))
+        x = np.concatenate((self.sol['psi'][1:-1],
+                            self.sol['phi_n'][1:-1],
+                            self.sol['phi_p'][1:-1]))
         fluct = newton.l2_norm(dx) / newton.l2_norm(x)
         self.fluct.append(fluct)
 
@@ -684,16 +685,17 @@ class LaserDiode(object):
 
         # update solution
         m = self.nx - 2
-        self.sol['psi'][1:-1] += dx[:m]*omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m]*omega
-        self.sol['phi_p'][1:-1] += dx[2*m:3*m]*omega
-        self._update_densities()
-        if dx[-1] > 0:
-            self.sol['S'] += dx[-1] * omega_S[0]
+        if self.ndim == 1:
+            self.sol['psi'][1:-1] += dx[:m]*omega
+            self.sol['phi_n'][1:-1] += dx[m:2*m]*omega
+            self.sol['phi_p'][1:-1] += dx[2*m:3*m]*omega
+            self._update_densities()
+            if dx[-1] > 0:
+                self.sol['S'] += dx[-1] * omega_S[0]
+            else:
+                self.sol['S'] += dx[-1] * omega_S[1]
         else:
-            self.sol['S'] += dx[-1] * omega_S[1]
-        self.sol['P'] = (self.photon_energy * self.vg * self.alpha_m
-                         * self.sol['S'] * self.w * self.L)
+            pass
 
         return fluct
 
@@ -803,8 +805,8 @@ class LaserDiode(object):
         rvec = np.zeros(m*3)
         rvec[:m] = vrs.poisson_res(psi, n, p, h, w, self.yin['eps'],
                                    self.eps_0, self.q, self.yin['C_dop'])
-        rvec[m:2*m] =  self.q*R*w - (jn[1:]-jn[:-1])
-        rvec[2*m:3*m]  = -self.q*R*w - (jp[1:]-jp[:-1])
+        rvec[m:2*m] = self.q*R*w - (jn[1:]-jn[:-1])
+        rvec[2*m:3*m] = -self.q*R*w - (jp[1:]-jp[:-1])
 
         # Jacobian
         # 1. Poisson's equation
@@ -853,7 +855,102 @@ class LaserDiode(object):
         return data, diags, rvec
 
     def _lasing_system_1D(self, discr):
-        pass
+        m = self.nx - 2
+        rvec = np.empty(m * 3 + 1)
+        data, diags, rvec[:-1] = self._transport_system(discr)
+
+        ixa = self.ar_ix
+        inds = np.where(ixa)[0] - 1
+        w_ar = (self.xbn[1:] - self.xbn[:-1])[inds-1]
+        T = self.yin['wg_mode'][ixa]
+        g0 = self.yin['g0'][ixa]
+        N_tr = self.yin['N_tr'][ixa]
+
+        # solution in the active region
+        psi = self.sol['psi'][ixa]
+        phi_n = self.sol['phi_n'][ixa]
+        phi_p = self.sol['phi_p'][ixa]
+        n = self.sol['n'][ixa]
+        p = self.sol['p'][ixa]
+        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'][ixa],
+                             self.yin['Ec'][ixa], self.Vt)
+        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'][ixa],
+                               self.yin['Ec'][ixa], self.Vt)
+        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'][ixa],
+                             self.yin['Nv'][ixa], self.Vt)
+        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'][ixa],
+                               self.yin['Ev'][ixa], self.Vt)
+
+        # calculate gain
+        N = p.copy()
+        ixn = (n < p)
+        N[ixn] = n[ixn]
+        gain = g0 * np.log(N / N_tr)
+        ix_abs = np.where(gain < 0)
+        gain[ix_abs] = 0.0  # ignore absorption
+
+        # gain derivatives
+        gain_dpsi = np.zeros_like(gain)
+        gain_dpsi[ixn] = g0[ixn] * dn_dpsi[ixn] / n[ixn]
+        gain_dpsi[~ixn] = g0[~ixn] * dp_dpsi[~ixn] / p[~ixn]
+        gain_dphin = np.zeros_like(gain)
+        gain_dphin[ixn] = g0[ixn] * dn_dphin[ixn] / n[ixn]
+        gain_dphip = np.zeros_like(gain)
+        gain_dphip[~ixn] = g0[~ixn] * dp_dphip[~ixn] / p[~ixn]
+        for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
+            gdot[ix_abs] = 0.0
+
+        # loss and net gain (Gamma*g - alpha)
+        alpha_fca = self._calculate_fca()
+        alpha = self.alpha_i + self.alpha_m + alpha_fca
+        net_gain = np.sum(gain * w_ar * T) - alpha
+
+        # stimulated emission rate and its derivatives
+        R_st = self.vg * gain * w_ar * T * S
+        dRst_dS = self.vg * gain * w_ar * T
+        dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S
+        dRst_dphin = self.vg * gain_dphin * w_ar * T * S
+        dRst_dphip = self.vg * gain_dphip * w_ar * T * S
+
+        # radiative recombination rate and its derivatives
+        n0 = self.yin['n0'][ixa]
+        p0 = self.yin['p0'][ixa]
+        B = self.yin['B'][ixa]
+        R = rec.rad_R(n, p, n0, p0, B)
+        dR_dpsi = rec.rad_Rdot(n, dn_dpsi, p, dp_dpsi, B)
+        dR_dphin = rec.rad_Rdot(n, dn_dphin, p, 0, B)
+        dR_dphip = rec.rad_Rdot(n, 0, p, dp_dphip, B)
+
+        # update vector of residuals
+        rvec[m + inds] += self.q * R_st
+        rvec[2*m + inds] += -self.q * R_st
+        rvec[-1] = (self.vg * net_gain * S
+                    + self.beta_sp * np.sum(R * w_ar * T))
+
+        # update Jacobian diagonals
+        data[6, inds] += self.q * dRst_dpsi        # j21
+        data[3, m+inds] += self.q * dRst_dphin     # j22
+        data[1, 2*m+inds] += self.q * dRst_dphip   # j23
+        data[9, inds] += -self.q * dRst_dpsi       # j31
+        data[6, m+inds] += -self.q * dRst_dphin    # j32
+        data[3, 2*m+inds] += -self.q * dRst_dphip  # j33
+        J = sparse.spdiags(data, diags, m=3*m+1, n=3*m+1, format='lil')
+
+        # fill rightmost column
+        J[m + inds, -1] = self.q * dRst_dS
+        J[2*m + inds, -1] = -self.q * dRst_dS
+
+        # fill bottom row
+        J[inds, -1] = (self.vg * gain_dpsi * S
+                       + self.beta_sp * dR_dpsi) * w_ar * T
+        J[m+inds, -1] = (self.vg * gain_dphin * S
+                         + self.beta_sp * dR_dphin) * w_ar * T
+        J[2*m+inds, -1] = (self.vg * gain_dphip * S
+                           + self.beta_sp * dR_dphip) * w_ar * T
+        J[-1, -1] = self.vg * net_gain
+
+        J = J.tocsc()
+        return J, rvec
 
     def _lasing_system_2D(self, discr):
         pass
@@ -1118,11 +1215,11 @@ if __name__ == '__main__':
     plt.rc('figure.subplot', left=0.15, right=0.85)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
-    ld = LaserDiode1D(design=sd, ar_inds=3,
-                      L=3000e-4, w=100e-4,
-                      R1=0.95, R2=0.05,
-                      lam=0.87e-4, ng=3.9,
-                      alpha_i=0.5, beta_sp=1e-4)
+    ld = LaserDiode(design=sd, ar_inds=3,
+                    L=3000e-4, w=100e-4,
+                    R1=0.95, R2=0.05,
+                    lam=0.87e-4, ng=3.9,
+                    alpha_i=0.5, beta_sp=1e-4)
     print('Complete.')
 
     # 1. nonuniform mesh
@@ -1180,7 +1277,7 @@ if __name__ == '__main__':
     ld.make_dimensionless()
     print('Solving drift-diffution system at small forward bias...',
           end=' ')
-    ld.lasing_init(0.1)
+    ld.apply_voltage(0.1)
     for _ in range(nsteps):
         ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
     print('Complete.')
