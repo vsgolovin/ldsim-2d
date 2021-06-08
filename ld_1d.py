@@ -485,10 +485,24 @@ class LaserDiode(object):
         else:  # self.ndim == 2
             solutions = self.sol2d
         for sol in solutions:
-            sol['n'] = cc.n(self.sol['psi'], self.sol['phi_n'],
-                            self.yin['Nc'], self.yin['Ec'], self.Vt)
-            sol['p'] = cc.p(self.sol['psi'], self.sol['phi_p'],
-                            self.yin['Nv'], self.yin['Ev'], self.Vt)
+            # aliases
+            psi = sol['psi']
+            phi_n = sol['phi_n']
+            phi_p = sol['phi_p']
+            Nc = self.yin['Nc']
+            Nv = self.yin['Nv']
+            Ec = self.yin['Ec']
+            Ev = self.yin['Ev']
+            Vt = self.Vt
+
+            # densities
+            sol['n'] = cc.n(psi, phi_n, Nc, Ec, Vt)
+            sol['p'] = cc.p(psi, phi_p, Nv, Ev, Vt)
+            # derivatives
+            sol['dn_dpsi'] = cc.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
+            sol['dn_dphin'] = cc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
+            sol['dp_dpsi'] = cc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
+            sol['dp_dphip'] = cc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
 
     # waveguide problem
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
@@ -726,18 +740,12 @@ class LaserDiode(object):
 
         # potentials, carrier densities and their derivatives at nodes
         psi = self.sol['psi']
-        phi_n = self.sol['phi_n']
-        phi_p = self.sol['phi_p']
         n = self.sol['n']
         p = self.sol['p']
-        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'],
-                             self.yin['Ec'], self.Vt)
-        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'],
-                               self.yin['Ec'], self.Vt)
-        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'],
-                             self.yin['Ev'], self.Vt)
-        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'],
-                               self.yin['Ev'], self.Vt)
+        dn_dpsi = self.sol['dn_dpsi']
+        dn_dphin = self.sol['dn_dphin']
+        dp_dpsi = self.sol['dp_dpsi']
+        dp_dphip = self.sol['dp_dphip']
 
         # Bernoulli function for current density calculation (m+1)
         B_plus = flux.bernoulli(+(psi[1:]-psi[:-1])/self.Vt)
@@ -867,19 +875,12 @@ class LaserDiode(object):
         S = self.sol['S']
 
         # solution in the active region
-        psi = self.sol['psi'][ixa]
-        phi_n = self.sol['phi_n'][ixa]
-        phi_p = self.sol['phi_p'][ixa]
         n = self.sol['n'][ixa]
         p = self.sol['p'][ixa]
-        dn_dpsi = cc.dn_dpsi(psi, phi_n, self.yin['Nc'][ixa],
-                             self.yin['Ec'][ixa], self.Vt)
-        dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'][ixa],
-                               self.yin['Ec'][ixa], self.Vt)
-        dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'][ixa],
-                             self.yin['Ev'][ixa], self.Vt)
-        dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'][ixa],
-                               self.yin['Ev'][ixa], self.Vt)
+        dn_dpsi = self.sol['dn_dpsi'][ixa]
+        dn_dphin = self.sol['dn_dphin'][ixa]
+        dp_dpsi = self.sol['dp_dpsi'][ixa]
+        dp_dphip = self.sol['dp_dphip'][ixa]
 
         # calculate gain
         N = p.copy()
