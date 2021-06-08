@@ -870,8 +870,6 @@ class LaserDiode(object):
         inds = np.where(ixa)[0] - 1
         w_ar = (self.xbn[1:] - self.xbn[:-1])[inds-1]
         T = self.yin['wg_mode'][ixa]
-        g0 = self.yin['g0'][ixa]
-        N_tr = self.yin['N_tr'][ixa]
         S = self.sol['S']
 
         # solution in the active region
@@ -882,24 +880,8 @@ class LaserDiode(object):
         dp_dpsi = self.sol['dp_dpsi'][ixa]
         dp_dphip = self.sol['dp_dphip'][ixa]
 
-        # calculate gain
-        N = p.copy()
-        ixn = (n < p)
-        N[ixn] = n[ixn]
-        gain = g0 * np.log(N / N_tr)
-        ix_abs = np.where(gain < 0)
-        gain[ix_abs] = 0.0  # ignore absorption
-
-        # gain derivatives
-        gain_dpsi = np.zeros_like(gain)
-        gain_dpsi[ixn] = g0[ixn] * dn_dpsi[ixn] / n[ixn]
-        gain_dpsi[~ixn] = g0[~ixn] * dp_dpsi[~ixn] / p[~ixn]
-        gain_dphin = np.zeros_like(gain)
-        gain_dphin[ixn] = g0[ixn] * dn_dphin[ixn] / n[ixn]
-        gain_dphip = np.zeros_like(gain)
-        gain_dphip[~ixn] = g0[~ixn] * dp_dphip[~ixn] / p[~ixn]
-        for gdot in [gain_dpsi, gain_dphin, gain_dphip]:
-            gdot[ix_abs] = 0.0
+        gain, dg_dpsi, dg_dphin, dg_dphip = \
+            self._calculate_gain()
 
         # loss and net gain (Gamma*g - alpha)
         alpha_fca = self._calculate_fca()
@@ -909,9 +891,9 @@ class LaserDiode(object):
         # stimulated emission rate and its derivatives
         R_st = self.vg * gain * w_ar * T * S
         dRst_dS = self.vg * gain * w_ar * T
-        dRst_dpsi = self.vg * gain_dpsi * w_ar * T * S
-        dRst_dphin = self.vg * gain_dphin * w_ar * T * S
-        dRst_dphip = self.vg * gain_dphip * w_ar * T * S
+        dRst_dpsi = self.vg * dg_dpsi * w_ar * T * S
+        dRst_dphin = self.vg * dg_dphin * w_ar * T * S
+        dRst_dphip = self.vg * dg_dphip * w_ar * T * S
 
         # radiative recombination rate and its derivatives
         n0 = self.yin['n0'][ixa]
@@ -942,11 +924,11 @@ class LaserDiode(object):
         J[2*m + inds, -1] = -self.q * dRst_dS
 
         # fill bottom row
-        J[inds, -1] = (self.vg * gain_dpsi * S
+        J[inds, -1] = (self.vg * dg_dpsi * S
                        + self.beta_sp * dR_dpsi) * w_ar * T
-        J[m+inds, -1] = (self.vg * gain_dphin * S
+        J[m+inds, -1] = (self.vg * dg_dphin * S
                          + self.beta_sp * dR_dphin) * w_ar * T
-        J[2*m+inds, -1] = (self.vg * gain_dphip * S
+        J[2*m+inds, -1] = (self.vg * dg_dphip * S
                            + self.beta_sp * dR_dphip) * w_ar * T
         J[-1, -1] = self.vg * net_gain
 
@@ -1119,6 +1101,42 @@ class LaserDiode(object):
         djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
 
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
+
+    def _calculate_gain(self):
+        "Calculate material gain and its derivatives at active region nodes."
+        # aliases
+        n = self.sol['n'][self.ar_ix]
+        p = self.sol['p'][self.ar_ix]
+        g0 = self.yin['g0'][self.ar_ix]
+        N_tr = self.yin['N_tr'][self.ar_ix]
+
+        N = p.copy()
+        ixn = (n < p)
+        ixp = ~ixn
+        N[ixn] = n[ixn]
+        gain = g0 * np.log(N / N_tr)
+        ix_abs = (gain < 0)
+        if ix_abs.all():
+            m = self.ar_ix.sum()
+            return [np.zeros(m)] * 4  # g, dg/dpsi, dg/dphin, dg/dphip
+        gain[ix_abs] = 0.0
+        ixn = np.logical_and(ixn, ~ix_abs)
+        ixp = np.logical_and(ixp, ~ix_abs)
+
+        # calculate gain derivatives
+        dn_dpsi = self.sol['dn_dpsi'][self.ar_ix]
+        dn_dphin = self.sol['dn_dphin'][self.ar_ix]
+        dp_dpsi = self.sol['dp_dpsi'][self.ar_ix]
+        dp_dphip = self.sol['dp_dphip'][self.ar_ix]
+        dg_dpsi = np.zeros_like(gain)
+        dg_dpsi[ixn] = g0[ixn] * dn_dpsi[ixn] / n[ixn]
+        dg_dpsi[ixp] = g0[ixp] * dp_dpsi[ixp] / p[ixp]
+        dg_dphin = np.zeros_like(gain)
+        dg_dphin[ixn] = g0[ixn] * dn_dphin[ixn] / n[ixn]
+        dg_dphip = np.zeros_like(gain)
+        dg_dphip[ixp] = g0[ixp] * dp_dphip[ixp] / p[ixp]
+
+        return gain, dg_dpsi, dg_dphin, dg_dphip
 
     def _calculate_fca(self, n=None, p=None):
         "Calculate free-carrier absorption."
