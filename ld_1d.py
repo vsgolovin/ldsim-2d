@@ -6,7 +6,6 @@ Can also solve 2D vertical-longitudinal (x-z) problem, in which a set of
 identical vertical slices are connected via stimulated emission.
 """
 
-from re import S
 import warnings
 import os
 import numpy as np
@@ -865,6 +864,7 @@ class LaserDiode(object):
         T = self.yin['wg_mode'][ixa]
         g0 = self.yin['g0'][ixa]
         N_tr = self.yin['N_tr'][ixa]
+        S = self.sol['S']
 
         # solution in the active region
         psi = self.sol['psi'][ixa]
@@ -877,7 +877,7 @@ class LaserDiode(object):
         dn_dphin = cc.dn_dphin(psi, phi_n, self.yin['Nc'][ixa],
                                self.yin['Ec'][ixa], self.Vt)
         dp_dpsi = cc.dp_dpsi(psi, phi_p, self.yin['Nv'][ixa],
-                             self.yin['Nv'][ixa], self.Vt)
+                             self.yin['Ev'][ixa], self.Vt)
         dp_dphip = cc.dp_dphip(psi, phi_p, self.yin['Nv'][ixa],
                                self.yin['Ev'][ixa], self.Vt)
 
