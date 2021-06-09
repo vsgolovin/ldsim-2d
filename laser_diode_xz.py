@@ -924,11 +924,11 @@ class LaserDiode(object):
         J[2*m + inds, -1] = -self.q * dRst_dS
 
         # fill bottom row
-        J[inds, -1] = (self.vg * dg_dpsi * S
+        J[-1, inds] = (self.vg * dg_dpsi * S
                        + self.beta_sp * dR_dpsi) * w_ar * T
-        J[m+inds, -1] = (self.vg * dg_dphin * S
+        J[-1, m+inds] = (self.vg * dg_dphin * S
                          + self.beta_sp * dR_dphin) * w_ar * T
-        J[2*m+inds, -1] = (self.vg * dg_dphip * S
+        J[-1, 2*m+inds] = (self.vg * dg_dphip * S
                            + self.beta_sp * dR_dphip) * w_ar * T
         J[-1, -1] = self.vg * net_gain
 
@@ -1448,19 +1448,16 @@ if __name__ == '__main__':
     plt.ylabel('Fluctuation')
     plt.yscale('log')
 
-    # 5. iterate until reached threshold
-    print('Increasing voltage until reached threshold.')
+    # 5. test at higher applied voltages
     ld.make_dimensionless()
-    V = 0.2
-    dV = 0.1
-    while ld.sol['S'] < 1:
+    for V in np.arange(0.2, 1.71, 0.1):
         ld.apply_voltage(V)
-        if V > 1.45:
-            ld.sol['S'] = 10.0
         fluct = 1
-        while fluct > 1e-9:
-            fluct = ld.lasing_step(0.05, [1.0, 0.05], 'mSG')
+        while fluct > 1e-8:
+            fluct = ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
         print(V, ld.iterations, ld.sol['S'])
-        V += dV
-        if V > 1.55:
-            break
+
+    # ld.apply_voltage(1.5)
+    # J, r = ld._lasing_system_1D('mSG')
+    # np.savetxt('J.txt', J.todense())
+    # np.savetxt('r.txt', r)
