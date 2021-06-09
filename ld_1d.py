@@ -941,10 +941,9 @@ class LaserDiode(object):
         data = np.zeros((11, 3*mx*mz))
         diags = [2*mx, mx, 1, 0, -1, -mx+1, -mx, -mx-1, -2*mx+1, -2*mx, -2*mx-1]
         rvec = np.zeros(3*mx*mz + 2*mz)
-        Sf, Sb = self.Sf, self.Sb
-        mSf = (Sf[1:] + Sf[:-1]) / 2
-        mSb = (Sb[1:] + Sb[:-1]) / 2
-        S = mSf + mSb
+        Sf_in = (self.Sf[1:] + self.Sf[:-1]) / 2
+        Sb_in = (self.Sb[1:] + self.Sb[:-1]) / 2
+        S = Sf_in + Sb_in
 
         w_ar = (self.xbn[1:] - self.xbn[:-1])[self.ar_ix[1:-1]]
         T = self.yin['wg_mode'][self.ar_ix]
@@ -958,22 +957,51 @@ class LaserDiode(object):
             self.sol = self.sol2d[k]
             self.sol['S'] = S[k]
 
+            # system without stimulated emission
             data[3*mx*k:3*mx*(k+1)], _, rvec[3*mx*k:3*mx*(k+1)] = \
                 self._transport_system(discr)
-            gain, dg_dpsi, dg_dphin, dg_dphip = self._calculate_gain()
 
+            # gain and stimulated emission rate
+            gain, dg_dpsi, dg_dphin, dg_dphip = self._calculate_gain()
             R_st = self.vg * gain * w_ar * T * S
             dRst_dS = self.vg * gain * w_ar * T
             dRst_dpsi = self.vg * dg_dpsi * w_ar * T * S
             dRst_dphin = self.vg * dg_dphin * w_ar * T * S
             dRst_dphip = self.vg * dg_dphip * w_ar * T * S
 
+            # loss and net gain
+            alpha_fca = self._calculate_fca()
+            alpha = self.alpha_i + alpha_fca
+            net_gain = np.sum(gain * w_ar * T) - alpha
+
+            # radiative recombination rate in the active region
+            n = self.sol['n'][self.ar_ix]
+            p = self.sol['p'][self.ar_ix]
+            n0 = self.yin['n0'][self.ar_ix]
+            p0 = self.yin['p0'][self.ar_ix]
+            B = self.yin['B'][self.ar_ix]
+            R = rec.rad_R(n, p, n0, p0, B)
+            dR_dpsi = rec.rad_Rdot(n, self.sol['dn_dpsi'][self.ar_ix],
+                                   p, self.sol['dp_dpsi'][self.ar_ix], B)
+            dR_dphin = rec.rad_Rdot(n, self.sol['dn_dphin'][self.ar_ix],
+                                    p, 0, B)
+            dR_dphip = rec.rad_Rdot(n, 0,
+                                    p, self.sol['dp_dphip'][self.ar_ix], B)
+
             # update vector of residuals
+            inds = np.where(self.ar_ix[1:-1])[0] + 3*mx*k
             rvec[mx+inds] += self.q * R_st
             rvec[2*mx+inds] += -self.q * R_st
+            rvec[3*mx*mz + k] = \
+                (self.vg*(self.Sb[k+1] - self.Sb[k]) / self.dz
+                 + self.vg * net_gain * Sb_in[k]
+                 + self.beta_sp * R)
+            rvec[3*mx*mz + mz + k] = \
+                (-self.vg*(self.Sf[k+1] - self.Sf[k]) / self.dz
+                 + self.vg * net_gain * Sf_in[k]
+                 + self.beta_sp * R)
 
             # update Jacobian diagonals
-            inds = np.where(self.ar_ix[1:-1]) + 3*mx*k
             data[6, inds] += self.q * dRst_dpsi         # j21
             data[3, mx+inds] += self.q * dRst_dphin     # j22
             data[1, 2*mx+inds] += self.q * dRst_dphip   # j23
@@ -982,8 +1010,66 @@ class LaserDiode(object):
             data[3, 2*mx+inds] += -self.q * dRst_dphip  # j33
 
             J24[mxa*k:mxa*(k+1)] = self.q * dRst_dS
- 
-        pass
+
+            J413_k = J4_13[:, 3*mxa*k:3*mxa*(k+1)]
+            J413_k[0, :mxa] = (self.beta_sp * dR_dpsi * w_ar * T
+                               + self.vg * dg_dpsi * w_ar * T * Sb_in[k])
+            J413_k[1, :mxa] = (self.beta_sp * dR_dpsi * w_ar * T
+                               + self.vg * dg_dpsi * w_ar * T * Sf_in[k])
+            J413_k[0, mxa:2*mxa] = \
+                (self.beta_sp * dR_dphin * w_ar * T
+                 + self.vg * dg_dphin * w_ar * T * Sb_in[k])
+            J413_k[1, mxa:2*mxa] = \
+                (self.beta_sp * dR_dphin * w_ar * T
+                 + self.vg * dg_dphin * w_ar * T * Sf_in[k])
+            J413_k[0, 2*mxa:3*mxa] = \
+                (self.beta_sp * dR_dphip * w_ar * T
+                 + self.vg * dg_dphip * w_ar * T * Sb_in[k])
+            J413_k[1, 2*mxa:3*mxa] = \
+                (self.beta_sp * dR_dphip * w_ar * T
+                 + self.vg * dg_dphip * w_ar * T * Sf_in[k])
+
+            J44[k, k] = self.vg * (-1/self.dz + net_gain/2)
+            if k < mz - 1:
+                J44[k, k+1] = self.vg * (1/self.dz + net_gain/2)
+            else:
+                J44[mz-1, -1] = self.R2 * self.vg * (1/self.dz + net_gain/2)
+            J44[mz+k, mz+k] = self.vg * (-1 / self.dz + net_gain/2)
+            if k > 0:
+                J44[mz+k, mz+k-1] = self.vg * (1/self.dz + net_gain/2)
+            else:
+                J44[mz, 0] = self.R1 * self.vg * (1/self.dz + net_gain/2)
+
+        J = sparse.spdiags(data, diags, format='lil',
+                           m=3*mx*mz + 2*mz, n=3*mx*mz + 2*mz)
+
+        # rightmost colums
+        inds = np.where(self.ar_ix[1:-1])[0]
+        for k in range(mz):
+            q_Rstdot = J24[mxa*k:mxa*(k+1)]  # q*dRst/dSb
+            for i in [0, 1, mz-1, mz]:
+                if k == 0 and i == 0:
+                    b = 1 + self.R1
+                elif k == mz-1 and i == mz:
+                    b = 1 + self.R2
+                else:
+                    b = 1
+                J[3*mx*k + mx + inds, 3*mx*mz + k+i] = q_Rstdot * b
+                J[3*mx*k + 2*mx + inds, 3*mx*mz + k+i] = -q_Rstdot * b
+
+        # bottom rows
+        for k in range(mz):
+            J413_k = J4_13[:, 3*mxa*k:3*mxa*(k+1)]
+            for i in range(3):
+                J[3*mx*mz + k, 3*mx*k + i*mx + inds] = \
+                    J413_k[0, mxa*i:mxa*(i+1)]
+                J[3*mx*mz + mz + k, 3*mx*k + i*mx + inds] = \
+                    J413_k[1, mxa*i:mxa*(i+1)]
+
+        # bottom right corner
+        J[3*mx*mz:, 3*mx*mz:] = J44
+
+        return J, rvec
 
     def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
 
@@ -1361,3 +1447,20 @@ if __name__ == '__main__':
     plt.xlabel('Iteration number')
     plt.ylabel('Fluctuation')
     plt.yscale('log')
+
+    # 5. iterate until reached threshold
+    print('Increasing voltage until reached threshold.')
+    ld.make_dimensionless()
+    V = 0.2
+    dV = 0.1
+    while ld.sol['S'] < 1:
+        ld.apply_voltage(V)
+        if V > 1.45:
+            ld.sol['S'] = 10.0
+        fluct = 1
+        while fluct > 1e-9:
+            fluct = ld.lasing_step(0.05, [1.0, 0.05], 'mSG')
+        print(V, ld.iterations, ld.sol['S'])
+        V += dV
+        if V > 1.55:
+            break

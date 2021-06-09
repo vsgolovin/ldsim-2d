@@ -278,7 +278,7 @@ class LaserDiode2D(LaserDiode1D):
                 (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
                  + self.vg * gain_dphin * w_ar * T * Sf[num])
             J413_j[0, 2*nxa:3*nxa] = \
-                (self.beta_sp * dRrad_dphin[ixa[1:-1]] * w_ar * T
+                (self.beta_sp * dRrad_dphip[ixa[1:-1]] * w_ar * T
                  + self.vg * gain_dphip * w_ar * T * Sb[num])
             J413_j[1, 2*nxa:3*nxa] = \
                 (self.beta_sp * dRrad_dphip[ixa[1:-1]] * w_ar * T
