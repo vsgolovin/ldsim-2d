@@ -936,6 +936,53 @@ class LaserDiode(object):
         return J, rvec
 
     def _lasing_system_2D(self, discr):
+        mx = self.nx - 2
+        mz = self.mz
+        data = np.zeros((11, 3*mx*mz))
+        diags = [2*mx, mx, 1, 0, -1, -mx+1, -mx, -mx-1, -2*mx+1, -2*mx, -2*mx-1]
+        rvec = np.zeros(3*mx*mz + 2*mz)
+        Sf, Sb = self.Sf, self.Sb
+        mSf = (Sf[1:] + Sf[:-1]) / 2
+        mSb = (Sb[1:] + Sb[:-1]) / 2
+        S = mSf + mSb
+
+        w_ar = (self.xbn[1:] - self.xbn[:-1])[self.ar_ix[1:-1]]
+        T = self.yin['wg_mode'][self.ar_ix]
+
+        mxa = np.sum(self.ar_ix)
+        J24 = np.zeros(mxa*mz)
+        J4_13 = np.zeros((2, 3*mxa*mz))
+        J44 = np.zeros((2*mz, 2*mz))
+
+        for k in range(mz):
+            self.sol = self.sol2d[k]
+            self.sol['S'] = S[k]
+
+            data[3*mx*k:3*mx*(k+1)], _, rvec[3*mx*k:3*mx*(k+1)] = \
+                self._transport_system(discr)
+            gain, dg_dpsi, dg_dphin, dg_dphip = self._calculate_gain()
+
+            R_st = self.vg * gain * w_ar * T * S
+            dRst_dS = self.vg * gain * w_ar * T
+            dRst_dpsi = self.vg * dg_dpsi * w_ar * T * S
+            dRst_dphin = self.vg * dg_dphin * w_ar * T * S
+            dRst_dphip = self.vg * dg_dphip * w_ar * T * S
+
+            # update vector of residuals
+            rvec[mx+inds] += self.q * R_st
+            rvec[2*mx+inds] += -self.q * R_st
+
+            # update Jacobian diagonals
+            inds = np.where(self.ar_ix[1:-1]) + 3*mx*k
+            data[6, inds] += self.q * dRst_dpsi         # j21
+            data[3, mx+inds] += self.q * dRst_dphin     # j22
+            data[1, 2*mx+inds] += self.q * dRst_dphip   # j23
+            data[9, inds] += -self.q * dRst_dpsi        # j31
+            data[6, mx+inds] += -self.q * dRst_dphin    # j32
+            data[3, 2*mx+inds] += -self.q * dRst_dphip  # j33
+
+            J24[mxa*k:mxa*(k+1)] = self.q * dRst_dS
+ 
         pass
 
     def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
