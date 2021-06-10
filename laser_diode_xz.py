@@ -176,9 +176,9 @@ class LaserDiode(object):
             y_ext[0] = y[0]
         if not isinstance(y_ext[-1], (float, int)):
             y_ext[1] = y[-1]
-        y_ext = np.concatenate([ np.array([y_ext[0]]),
-                                 y,
-                                 np.array([y_ext[1]]) ])
+        y_ext = np.concatenate([np.array([y_ext[0]]),
+                                y,
+                                np.array([y_ext[1]])])
 
         # function for choosing local step size
         f = np.abs(y_ext[2:]-y_ext[:-2])  # change of y at every point
@@ -284,14 +284,21 @@ class LaserDiode(object):
         # mesh
         self.xin /= units.x
         self.xbn /= units.x
+        self.zin /= units.x
+        self.zbn /= units.x
 
         # arrays
         for key in self.yin:
             self.yin[key] /= units.dct[key]
         for key in self.ybn:
             self.ybn[key] /= units.dct[key]
-        for key in self.sol:
-            self.sol[key] /= units.dct[key]
+        if self.ndim == 1:
+            solutions = [self.sol]
+        else:
+            solutions = self.sol2d
+        for sol in solutions:
+            for key in sol:
+                sol[key] /= units.dct[key]
 
         self.is_dimensionless = True
 
@@ -348,7 +355,7 @@ class LaserDiode(object):
         self.Sf[-1] = S / (1 + self.R2)
         self.Sb = np.zeros(m + 1)
         self.Sb[0] = S / (1 + self.R1)
-        self.Sb[1:-1] = self.sol['S'] / 2
+        self.Sb[1:-1] = S / 2
         self.Sb[-1] = S * self.R2 / (1 + self.R2)
 
         # self.sol -> self.sol2d
@@ -1000,7 +1007,7 @@ class LaserDiode(object):
             # gain and stimulated emission rate
             gain, dg_dpsi, dg_dphin, dg_dphip = self._calculate_gain()
             R_st = self.vg * gain * w_ar * T * S[k]
-            dRst_dS = self.vg * gain * w_ar * T
+            dRst_dSb = self.vg * gain * w_ar * T / 2
             dRst_dpsi = self.vg * dg_dpsi * w_ar * T * S[k]
             dRst_dphin = self.vg * dg_dphin * w_ar * T * S[k]
             dRst_dphip = self.vg * dg_dphip * w_ar * T * S[k]
@@ -1023,7 +1030,7 @@ class LaserDiode(object):
                                     p, 0, B)
             dR_dphip = rec.rad_Rdot(n, 0,
                                     p, self.sol['dp_dphip'][self.ar_ix], B)
-            R_modal = np.sum(R * w_ar  * T)
+            R_modal = np.sum(R * w_ar * T)
 
             # update vector of residuals
             inds = np.where(self.ar_ix[1:-1])[0] + 3*mx*k
@@ -1032,11 +1039,11 @@ class LaserDiode(object):
             rvec[3*mx*mz + k] = \
                 (self.vg*(self.Sb[k+1] - self.Sb[k]) / self.dz
                  + self.vg * net_gain * Sb_in[k]
-                 + self.beta_sp * R_modal)
+                 + self.beta_sp * R_modal/2)
             rvec[3*mx*mz + mz + k] = \
                 (-self.vg*(self.Sf[k+1] - self.Sf[k]) / self.dz
                  + self.vg * net_gain * Sf_in[k]
-                 + self.beta_sp * R_modal)
+                 + self.beta_sp * R_modal/2)
 
             # update Jacobian diagonals
             data[6, inds] += self.q * dRst_dpsi         # j21
@@ -1046,7 +1053,7 @@ class LaserDiode(object):
             data[6, mx+inds] += -self.q * dRst_dphin    # j32
             data[3, 2*mx+inds] += -self.q * dRst_dphip  # j33
 
-            J24[mxa*k:mxa*(k+1)] = self.q * dRst_dS
+            J24[mxa*k:mxa*(k+1)] = self.q * dRst_dSb
 
             J413_k = J4_13[:, 3*mxa*k:3*mxa*(k+1)]
             J413_k[0, :mxa] = (self.beta_sp * dR_dpsi * w_ar * T
@@ -1489,7 +1496,7 @@ if __name__ == '__main__':
 
     # 5. test at higher applied voltages
     ld.make_dimensionless()
-    for V in np.arange(0.2, 1.71, 0.1):
+    for V in np.arange(0.2, 1.51, 0.1):
         ld.apply_voltage(V)
         fluct = 1
         while fluct > 1e-8:
@@ -1500,5 +1507,9 @@ if __name__ == '__main__':
     ld.to_2D(10)
     print(ld.Sb[0], ld.Sf[-1])
     for i in range(20):
-        fluct = ld.lasing_step(0.1, [0.1, 0.1], 'mSG')
+        fluct = ld.lasing_step(1.0, [1.0, 1.0], 'mSG')
         print(i, fluct, ld.Sb[0], ld.Sf[-1])
+    # J, r = ld._lasing_system_2D('mSG')
+    # inds = np.where(ld.ar_ix[1:-1])[0]
+    # mx = ld.nx - 2
+    # mz = len(ld.zin)
