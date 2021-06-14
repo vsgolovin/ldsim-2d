@@ -1639,7 +1639,7 @@ if __name__ == '__main__':
     plt.rc('figure.subplot', left=0.15, right=0.85)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
-    ld = LaserDiode(design=sd, ar_inds=3,
+    ld = LaserDiode(design=sd, ar_inds=10,
                     L=3000e-4, w=100e-4,
                     R1=0.95, R2=0.05,
                     lam=0.87e-4, ng=3.9,
@@ -1732,9 +1732,12 @@ if __name__ == '__main__':
         while fluct > 1e-8:
             fluct = ld.lasing_step(0.1, [1.0, 0.1], 'mSG')
         print(V, ld.iterations, ld.sol['S'])
+    ld.original_units()
     plt.figure('Photon density distribution')
-    plt.plot(ld.zbn, ld.Sb, 'bx')
-    plt.plot(ld.zbn, ld.Sf, 'rx')
+    plt.plot(ld.zbn*1e4, ld.Sb, 'bx')
+    plt.plot(ld.zbn*1e4, ld.Sf, 'rx')
+    plt.xlabel(r'$z$ ($\mu$m)')
+    plt.ylabel('$S$ (cm$^{-2}$)')
 
     I_1D = ld.get_I()
     P = ld.get_P()
@@ -1743,12 +1746,14 @@ if __name__ == '__main__':
 
     # 5.2. move from 1D to 2D model
     print('2D problem')
+    ld.make_dimensionless()
     ld.to_2D(10)
     for i in range(30):
         fluct = ld.lasing_step(1.0, [1.0, 1.0], 'mSG')
         print(i, fluct, ld.Sb[0], ld.Sf[-1])
-    plt.plot(ld.zbn, ld.Sb, 'b.--')
-    plt.plot(ld.zbn, ld.Sf, 'r.--')
+    ld.original_units()
+    plt.plot(ld.zbn*1e4, ld.Sb, 'b.--')
+    plt.plot(ld.zbn*1e4, ld.Sf, 'r.--')
 
     I_2D = ld.get_I()
     P = ld.get_P()

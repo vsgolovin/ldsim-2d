@@ -7,22 +7,21 @@ at forward bias.
 import numpy as np
 import matplotlib.pyplot as plt
 from sample_design import sd
-from ld_1d import LaserDiode1D
-import units
+from laser_diode_xz import LaserDiode
 
 # export settings
 export = True
 export_folder = 'results'
 
 # set up the problem
-ld = LaserDiode1D(design=sd, ar_inds=3,
-                  L=3000e-4, w=100e-4,
-                  R1=0.95, R2=0.05,
-                  lam=0.87e-4, ng=3.9,
-                  alpha_i=0.5, beta_sp=1e-4)
+ld = LaserDiode(design=sd, ar_inds=10,
+                L=3000e-4, w=100e-4,
+                R1=0.95, R2=0.05,
+                lam=0.87e-4, ng=3.9,
+                alpha_i=0.5, beta_sp=1e-4)
 ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, y_ext=[0.5, 0.5])
 ld.make_dimensionless()
-ld.solve_waveguide(remove_layers=[1, 1])  # ignore contact layers
+ld.solve_waveguide(remove_layers=(1, 1))  # ignore contact layers
 ld.solve_equilibrium()
 
 # arrays for storing results
@@ -32,14 +31,14 @@ I_values = np.zeros_like(voltages)
 Isrh_values = np.zeros_like(voltages)
 Irad_values = np.zeros_like(voltages)
 Iaug_values = np.zeros_like(voltages)
-P_values = np.zeros_like(voltages)
+P_values = np.zeros((2, len(voltages)))
 print('Voltage Iterations Power')
 
 # solve the transport system for every voltage
 # use previous solution as initial guess
 for i, v in enumerate(voltages):
     print('  %.2f' % v, end='  ')
-    ld.lasing_init(v)    # apply boundary conditions
+    ld.apply_voltage(v)  # apply boundary conditions
     fluct = 1            # fluctuation -- ratio of update vector and
                          # solution L2 norms
     while fluct > 1e-8:  # perform Newton's method iterations
@@ -58,18 +57,18 @@ for i, v in enumerate(voltages):
     # density at threshold.
 
     # save results to corresponding arrays
-    j_values[i] = -ld.sol['J'] * units.j                 # A/cm2
-    I_values[i] = -ld.sol['I'] * (units.j * units.x**2)  # A
-    P_values[i] = ld.sol['P'] * (units.E / units.t)      # W
+    j_values[i] = -1 * ld.get_J()
+    I_values[i] = -1 * ld.get_I()
+    P_values[:, i] = ld.get_P()
     # recombination currents
-    Isrh_values[i] = ld.sol['I_srh'] * (units.j * units.x**2)
-    Irad_values[i] = ld.sol['I_rad'] * (units.j * units.x**2)
-    Iaug_values[i] = ld.sol['I_aug'] * (units.j * units.x**2)
+    Isrh_values[i] = ld.get_Isp('SRH')
+    Irad_values[i] = ld.get_Isp('radiative')
+    Iaug_values[i] = ld.get_Isp('Auger')
 
     # save current band diagram and display progress
     if export:
-        ld.export_results(folder='results', x_to_um=True)
-    print('  %5d    %.1e' % (ld.iterations, P_values[i]))
+        ld.export_results(folder=export_folder, x_to_um=True)
+    print('  %5d    %.1e' % (ld.iterations, P_values[:, i].sum()))
 
 ld.original_units()
 x = ld.xin * 1e4
@@ -114,17 +113,20 @@ plt.xlabel('$V$')
 plt.ylabel('$j$ (kA / cm$^2$)')
 
 plt.figure('P-I curve')
-plt.plot(I_values, P_values, 'b.-')
+plt.plot(I_values, P_values[0, :], 'r.-', label='$P_1$')
+plt.plot(I_values, P_values[1, :], 'b.-', label='$P_2$')
+plt.legend()
 plt.xlabel('$I$ (A)')
 plt.ylabel('$P$ (W)')
 
 # export arrays with simulation results
 if export:
     with open(export_folder + '/' + 'LIV.csv', 'w') as f:
-        f.write(','.join(('V', 'J', 'I', 'P', 'I_srh', 'I_rad', 'I_aug')))
+        f.write(','.join(('V', 'J', 'I', 'P1', 'P2', 'I_srh', 'I_rad', 'I_aug')))
         for i in range(len(voltages)):
             f.write('\n')
             vals = map(str, (voltages[i], j_values[i], I_values[i],
-                            P_values[i], Isrh_values[i], Irad_values[i],
-                            Iaug_values[i]))
+                             P_values[0, i], P_values[1, i],
+                             Isrh_values[i], Irad_values[i],
+                             Iaug_values[i]))
             f.write(','.join(vals))
