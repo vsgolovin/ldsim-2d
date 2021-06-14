@@ -286,6 +286,7 @@ class LaserDiode(object):
         self.xbn /= units.x
         self.zin /= units.x
         self.zbn /= units.x
+        self.dz /= units.x
 
         # arrays
         for key in self.yin:
@@ -299,6 +300,8 @@ class LaserDiode(object):
         for sol in solutions:
             for key in sol:
                 sol[key] /= units.dct[key]
+        self.Sf /= units.n * units.x
+        self.Sb /= units.n * units.x
 
         self.is_dimensionless = True
 
@@ -328,6 +331,7 @@ class LaserDiode(object):
         self.xbn *= units.x
         self.zin *= units.x
         self.zbn *= units.x
+        self.dz *= units.x
 
         # arrays
         for key in self.yin:
@@ -341,6 +345,8 @@ class LaserDiode(object):
         for sol in solutions:
             for key in sol:
                 sol[key] *= units.dct[key]
+        self.Sb *= units.n * units.x
+        self.Sf *= units.n * units.x
 
         self.is_dimensionless = False
 
@@ -807,15 +813,20 @@ class LaserDiode(object):
         # calculating current densities and their derivatives
         if discr == 'SG':  # Scharfetter-Gummel discretization
             jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
-                self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                self._jn_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                            derivatives=True)
             jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
-                self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                            derivatives=True)
+
 
         elif discr == 'mSG':  # modified SG discretization
             jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
-                self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                             derivatives=True)
             jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = \
-                self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h)
+                self._jp_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                             derivatives=True)
 
         else:
             raise Exception('Error: unknown current density '
@@ -1140,7 +1151,8 @@ class LaserDiode(object):
         J = J.tocsc()
         return J, rvec
 
-    def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+    def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+               derivatives=True):
         "Electron current density, Scharfetter-Gummel scheme."
         psi = self.sol['psi']
         phi_n = self.sol['phi_n']
@@ -1165,6 +1177,8 @@ class LaserDiode(object):
         # electron current density and its derivatives
         jn = flux.SG_jn(n1, n2, B_plus, B_minus, h,
                         self.Vt, self.q, self.ybn['mu_n'])
+        if not derivatives:
+            return jn
         djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus,
                                       Bdot_plus, Bdot_minus, h, self.Vt,
                                       self.q, self.ybn['mu_n'])
@@ -1178,7 +1192,8 @@ class LaserDiode(object):
 
         return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
 
-    def _jp_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+    def _jp_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+               derivatives=True):
         "Hole current density, Scharfetter-Gummel scheme."
         psi = self.sol['psi']
         phi_p = self.sol['phi_p']
@@ -1203,6 +1218,8 @@ class LaserDiode(object):
         # hole current density and its derivatives
         jp = flux.SG_jp(p1, p2, B_plus, B_minus, h,
                         self.Vt, self.q, self.ybn['mu_p'])
+        if not derivatives:
+            return jp
         djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus,
                                       Bdot_plus, Bdot_minus, h, self.Vt,
                                       self.q, self.ybn['mu_p'])
@@ -1216,7 +1233,8 @@ class LaserDiode(object):
 
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
 
-    def _jn_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+    def _jn_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                derivatives=True):
         "Electron current density, modified Scharfetter-Gummel scheme."
         psi = self.sol['psi']
         phi_n = self.sol['phi_n']
@@ -1234,6 +1252,8 @@ class LaserDiode(object):
                             h, self.ybn['Nc'], self.Vt, self.q,
                             self.ybn['mu_n'])
         jn = jn_SG * gn
+        if not derivatives:
+            return jn
 
         # electron current density derivatives
         Fdot = sdf.fermi_dot_fdint
@@ -1260,7 +1280,8 @@ class LaserDiode(object):
 
         return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
 
-    def _jp_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+    def _jp_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h,
+                derivatives=True):
         "Hole current density, modified Scharfetter-Gummel scheme."
         psi = self.sol['psi']
         phi_p = self.sol['phi_p']
@@ -1278,6 +1299,8 @@ class LaserDiode(object):
                             h, self.ybn['Nv'], self.Vt, self.q,
                             self.ybn['mu_p'])
         jp = jp_SG * gp
+        if not derivatives:
+            return jp
 
         # hole current density derivatives
         Fdot = sdf.fermi_dot_fdint
@@ -1355,6 +1378,170 @@ class LaserDiode(object):
             p = p[1:-1]
         arr = T*w*(n*self.fca_e + p*self.fca_h)
         return np.sum(arr)
+
+    # extract useful data from simulation results
+    def get_J(self, discr='mSG'):
+        "Get current density through device (A/cm2)."
+        # function for calculating current density
+        def calc(self, discr):
+            psi = self.sol['psi']
+            B_plus = flux.bernoulli(+(psi[1:] - psi[:-1]) / self.Vt)
+            B_minus = flux.bernoulli(-(psi[1:] - psi[:-1]) / self.Vt)
+            h = self.xin[1:] - self.xin[:-1]
+            if discr == 'SG':
+                jn = self._jn_SG(B_plus, B_minus, Bdot_plus=None,
+                                 Bdot_minus=None, h=h, derivatives=False)
+                jp = self._jp_SG(B_plus, B_minus, Bdot_plus=None,
+                                 Bdot_minus=None, h=h, derivatives=False)
+            elif discr == 'mSG':
+                jn = self._jn_mSG(B_plus, B_minus, Bdot_plus=None,
+                                  Bdot_minus=None, h=h, derivatives=False)
+                jp = self._jp_mSG(B_plus, B_minus, Bdot_plus=None,
+                                  Bdot_minus=None, h=h, derivatives=False)
+            else:
+                raise Exception('Error: unknown current density '
+                                + 'discretization scheme %s.' % discr)
+            return (jn + jp).mean()
+
+        # 1D -- return float, 2D -- return numpy.ndarray
+        if self.ndim == 1:
+            J = calc(self, discr)
+        else:  # calculate J for every slice
+            J = np.zeros(self.mz)
+            for k in range(self.mz):
+                self.sol = self.sol2d[k]
+                J[k] = calc(self, discr)
+            self.sol = dict()
+
+        if self.is_dimensionless:
+            J *= units.j  # convert to A/cm2
+        return J
+
+    def get_I(self, discr='mSG'):
+        "Get current through device (A)."
+        if self.is_dimensionless:
+            w = self.w * units.x
+            dz = self.dz * units.x
+        else:
+            w = self.w
+            dz = self.dz
+        return self.get_J(discr) * w * dz
+
+    def get_P(self):
+        "Get output power from each facet (W)."
+        P = np.zeros(2)
+        E_ph = self.photon_energy
+        P[0] = E_ph * self.vg * self.Sb[0] * (1 - self.R1) * self.w
+        P[1] = E_ph * self.vg * self.Sf[-1] * (1 - self.R2) * self.w
+        if self.is_dimensionless:
+            P *= units.P
+        return P
+
+    def get_FCA(self):
+        "Get free-carrier absorption (cm-1)."
+        if self.ndim == 1:
+            alpha_fca = self._calculate_fca()
+        else:
+            alpha_fca = np.zeros(self.mz)
+            for k in range(self.mz):
+                self.sol = self.sol2d[k]
+                alpha_fca[k] = self._calculate_fca()
+            self.sol = dict()
+        if self.is_dimensionless:
+            alpha_fca *= (1 / units.x)
+        return alpha_fca
+
+    def get_Jsp(self, which='all'):
+        """
+        Get current density through device corresponding to spontaneous
+        recombination (A/cm2).
+
+        Parameters
+        ----------
+        which : str
+            Recombination mechanism. One of:
+                * `'SRH'`,
+                * `'radiative'`,
+                * `'Auger'`,
+                * `'all'`.
+
+        """
+        # functions for calculating recombination rate
+        def R_srh(n, p):
+            return rec.srh_R(n, p, n0=self.yin['n0'][1:-1],
+                             p0=self.yin['p0'][1:-1],
+                             tau_n=self.yin['tau_n'][1:-1],
+                             tau_p=self.yin['tau_p'][1:-1])
+
+        def R_rad(n, p):
+            return rec.rad_R(n, p, n0=self.yin['n0'][1:-1],
+                             p0=self.yin['p0'][1:-1], B=self.yin['B'][1:-1])
+
+        def R_aug(n, p):
+            return rec.auger_R(n, p, n0=self.yin['n0'][1:-1],
+                               p0=self.yin['p0'][1:-1],
+                               Cn=self.yin['Cn'][1:-1],
+                               Cp=self.yin['Cp'][1:-1])
+
+        def R(n, p):
+            return R_srh(n, p) + R_rad(n, p) + R_aug(n, p)
+
+        # choose function
+        if which == 'all':
+            R_fun = R
+        elif which.lower() == 'srh':
+            R_fun = R_srh
+        elif which.lower() in ('rad', 'radiative'):
+            R_fun = R_rad
+        elif which.lower() in ('aug', 'auger'):
+            R_fun = R_aug
+        else:
+            raise Exception('Error: unknown recombination mechanism %s.'
+                            % which)
+
+        # calculate spontaneous recombination current density
+        J_sp = self._J_sp(R_fun)
+        if self.is_dimensionless:
+            J_sp *= units.j
+        return J_sp
+
+    def get_Isp(self, which='all'):
+        """
+        Get current through device corresponding to spontaneous
+        recombination (A).
+
+        Parameters
+        ----------
+        which : str
+            Recombination mechanism. One of:
+                * `'SRH'`,
+                * `'radiative'`,
+                * `'Auger'`,
+                * `'all'`.
+
+        """
+        J_sp = self.get_Jsp(which)
+        W = self.w
+        dz = self.dz
+        if self.is_dimensionless:
+            W *= units.x
+            dz *= units.x
+        return J_sp * W * dz
+
+    def _J_sp(self, R_fun):
+        "J_sp for arbitrary recombination mechanism."
+        w = self.xbn[1:] - self.xbn[:-1]
+        if self.ndim == 1:
+            n = self.sol['n'][1:-1]
+            p = self.sol['p'][1:-1]
+            J = self.q * np.sum(R_fun(n, p) * w)
+        else:
+            J = np.zeros(self.mz)
+            for k in range(self.mz):
+                n = self.sol2d[k]['n'][1:-1]
+                p = self.sol2d[k]['p'][1:-1]
+                J[k] = self.q * np.sum(R_fun(n, p) * w)
+        return J
 
     def export_results(self, folder=None, vp=2, delimiter=',', x_to_um=True):
         """
@@ -1534,6 +1721,11 @@ if __name__ == '__main__':
     plt.plot(ld.zbn, ld.Sb, 'bx')
     plt.plot(ld.zbn, ld.Sf, 'rx')
 
+    I_1D = ld.get_I()
+    P = ld.get_P()
+    print('I_1D =', I_1D)
+    print(f'P_1D = {P[0]:.3f} + {P[1]:.3f} W')
+
     # 5.2. move from 1D to 2D model
     print('2D problem')
     ld.to_2D(10)
@@ -1542,3 +1734,8 @@ if __name__ == '__main__':
         print(i, fluct, ld.Sb[0], ld.Sf[-1])
     plt.plot(ld.zbn, ld.Sb, 'b.--')
     plt.plot(ld.zbn, ld.Sf, 'r.--')
+
+    I_2D = ld.get_I()
+    P = ld.get_P()
+    print('I_2D = ', I_2D.sum())
+    print(f'P_2D = {P[0]:.3f} + {P[1]:.3f} W')
