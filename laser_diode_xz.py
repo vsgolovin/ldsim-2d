@@ -1543,10 +1543,11 @@ class LaserDiode(object):
                 J[k] = self.q * np.sum(R_fun(n, p) * w)
         return J
 
+    # export simulation results
     def export_results(self, folder=None, vp=2, delimiter=',', x_to_um=True):
         """
-        Export current solution in the diagram form to a csv file
-        `#.##V.csv`, where `#.##` refers to the applied voltage.
+        Export current solution in the band diagram form to one or several
+        csv files (depending on the number of dimensions).
 
         Parameters
         ----------
@@ -1556,12 +1557,11 @@ class LaserDiode(object):
             Voltage precision, i.e. number of digits after `.`, to use in
             the file name. The default is `2`.
         delimiter : str
-            Column separator to use.
+            Column separator to use. The default is `','`.
         x_to_um : bool
             Whether to convert `x` from centimeters to micrometers.
 
         """
-        assert self.ndim == 1
         # pick directory for export
         if folder is not None and isinstance(folder, str):
             if not os.path.isdir(folder):
@@ -1569,14 +1569,31 @@ class LaserDiode(object):
         else:
             folder = ''
 
-        # make file name
-        voltage = self.sol['phi_n'][-1] - self.sol['phi_n'][0]
+        # make file name without '1D' or '2D' prefix
+        if self.ndim == 1:
+            sol = self.sol
+        else:
+            sol = self.sol2d[0]
+        voltage = sol['phi_n'][-1] - sol['phi_n'][0]
         if self.is_dimensionless:
             voltage *= units.V
         assert isinstance(vp, int) and vp >= 0
         s = '{:.' + str(vp) + 'f}'  # format string
         fname = s.format(voltage) + 'V.csv'
 
+        # export results
+        if self.ndim == 1:  # 1D -> single csv file
+            file = os.path.join(folder, '1D_' + fname)
+            self._export_solution(file, delimiter, x_to_um)
+
+        else:  # 2D -> one csv file per slice
+            for k in range(self.mz):
+                self.sol = self.sol2d[k]
+                file = os.path.join(folder, f'2D_{k+1}_'+fname)
+                self._export_solution(file, delimiter, x_to_um)
+            self.sol = dict()
+
+    def _export_solution(self, file, delimiter, x_to_um):
         # create arrays for export
         x = self.xin.copy()
         Ev = self.yin['Ev'] - self.sol['psi']
@@ -1591,8 +1608,8 @@ class LaserDiode(object):
             x *= units.x
             Ev *= units.E
             Ec *= units.E
-            Fn *= units.V  # units.E == units.V
-            Fp *= units.V
+            Fn *= units.E
+            Fp *= units.E
             n *= units.n
             p *= units.n
 
@@ -1601,12 +1618,10 @@ class LaserDiode(object):
             x *= 1e4
 
         # write to file
-        with open(os.path.join(folder, fname), 'w') as f:
+        with open(file, 'w') as f:
             # header
-            assert isinstance(delimiter, str)
             f.write(delimiter.join(('x', 'Ev', 'Ec',
                                     'Fn', 'Fp', 'n', 'p')))
-
             # values
             for i in range(self.nx):
                 f.write('\n')
