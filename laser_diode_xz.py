@@ -377,7 +377,24 @@ class LaserDiode(object):
             for key in ('psi', 'phi_n', 'phi_p', 'n', 'p',
                         'dn_dpsi', 'dn_dphin', 'dp_dpsi', 'dp_dphip'):
                 self.sol2d[i][key] = self.sol[key].copy()
+        self.iterations = 0
+        self.fluct = list()
         self.ndim = 2
+
+    def to_1D(self):
+        "Convert 2D problem back to 1D."
+        assert self.ndim == 2
+        self.mz = 1
+        self.dz = self.L
+        self.zin = np.array([self.L / 2])
+        self.zbn = np.array([0.0, self.L])
+        self.sol = self.sol2d[0].copy()
+        self.sol2d = list()
+        self.Sb = np.array([self.Sb[0], self.Sb[-1]])
+        self.Sf = np.array([self.Sf[0], self.Sf[-1]])
+        self.iterations = 0
+        self.fluct = list()
+        self.ndim = 1
 
     def _update_Sb_Sf_1D(self):
         "Calculate `Sf` and `Sb` in a 1D model (S != f(z))."
