@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Solving drift-diffusion system coupled with photon density rate equation
-at forward bias.
+Calculate P-I and J-V curves for a laser diode with design described in
+`sample_design.py` by using a 1D drift-diffusion model.
 """
 
 import numpy as np
@@ -26,21 +26,22 @@ ld.solve_equilibrium()
 
 # arrays for storing results
 voltages = np.arange(0, 2.51, 0.1)
-j_values = np.zeros_like(voltages)
-I_values = np.zeros_like(voltages)
-Isrh_values = np.zeros_like(voltages)
-Irad_values = np.zeros_like(voltages)
-Iaug_values = np.zeros_like(voltages)
-P_values = np.zeros((2, len(voltages)))
-print('Voltage Iterations Power')
+J_values = np.zeros_like(voltages)
+Jsrh_values = np.zeros_like(voltages)    # Shockley-Read-Hall
+Jrad_values = np.zeros_like(voltages)    # radiative
+Jaug_values = np.zeros_like(voltages)    # Auger
+fca_values = np.zeros_like(voltages)     # free-carrier absorption (cm-1)
+P_values = np.zeros((2, len(voltages)))  # power from both facets
 
 # solve the transport system for every voltage
 # use previous solution as initial guess
+print('Voltage Iterations Power')
 for i, v in enumerate(voltages):
     print('  %.2f' % v, end='  ')
     ld.apply_voltage(v)  # apply boundary conditions
-    fluct = 1            # fluctuation -- ratio of update vector and
-                         # solution L2 norms
+    # track convergence with fluctuation
+    # i.e., ratio of update vector and solution L2 norms
+    fluct = 1  # initial value
     while fluct > 1e-8:  # perform Newton's method iterations
         # choose value of damping parameter `omega`
         # depending on fluctuation
@@ -57,30 +58,34 @@ for i, v in enumerate(voltages):
     # density at threshold.
 
     # save results to corresponding arrays
-    j_values[i] = -1 * ld.get_J()
-    I_values[i] = -1 * ld.get_I()
+    J_values[i] = -1 * ld.get_J()
     P_values[:, i] = ld.get_P()
-    # recombination currents
-    Isrh_values[i] = ld.get_Isp('SRH')
-    Irad_values[i] = ld.get_Isp('radiative')
-    Iaug_values[i] = ld.get_Isp('Auger')
+    Jsrh_values[i] = ld.get_Jsp('SRH')
+    Jrad_values[i] = ld.get_Jsp('radiative')
+    Jaug_values[i] = ld.get_Jsp('Auger')
+    fca_values[i] = ld.get_FCA()
 
     # save current band diagram and display progress
     if export:
         ld.export_results(folder=export_folder, x_to_um=True)
     print('  %5d    %.1e' % (ld.iterations, P_values[:, i].sum()))
 
+# prepare results for plotting / export
 ld.original_units()
 x = ld.xin * 1e4
+I_values = J_values * ld.L * ld.w
+Isrh_values = Jsrh_values * ld.L * ld.w
+Irad_values = Jrad_values * ld.L * ld.w
+Iaug_values = Jaug_values * ld.L * ld.w
 
-# plot results
 # change default Matplotlib settings
 plt.rc('lines', linewidth=0.7)
 plt.rc('figure.subplot', left=0.15, right=0.85)
 
+# plot results
 plt.figure('Waveguide mode')
 plt.plot(x, ld.yin['wg_mode'], 'b-')
-plt.ylabel('Mode intensity')
+plt.ylabel('Mode intensity', color='b')
 plt.xlabel(r'$x$ ($\mu$m)')
 plt.twinx()
 plt.plot(x, ld.yin['n_refr'], 'k-', lw=0.5)
@@ -108,7 +113,7 @@ plt.yscale('log')
 plt.ylabel('$n$, $p$ (cm$^-3$)')
 
 plt.figure('J-V curve')
-plt.plot(voltages, j_values*1e-3, 'b.-')
+plt.plot(voltages, J_values*1e-3, 'b.-')
 plt.xlabel('$V$')
 plt.ylabel('$j$ (kA / cm$^2$)')
 
@@ -125,7 +130,7 @@ if export:
         f.write(','.join(('V', 'J', 'I', 'P1', 'P2', 'I_srh', 'I_rad', 'I_aug')))
         for i in range(len(voltages)):
             f.write('\n')
-            vals = map(str, (voltages[i], j_values[i], I_values[i],
+            vals = map(str, (voltages[i], J_values[i], I_values[i],
                              P_values[0, i], P_values[1, i],
                              Isrh_values[i], Irad_values[i],
                              Iaug_values[i]))
