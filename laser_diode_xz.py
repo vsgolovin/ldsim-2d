@@ -200,6 +200,10 @@ class LaserDiode(object):
         self.nx = len(self.xin)
         self.calc_all_params()
 
+        # return grid nodes, values of `param` at grid nodes
+        # and function values used to determine local step
+        return x, y, step_min + k*(1 - fg_fun(x))
+
     def calc_all_params(self):
         "Calculate all parameters' values at mesh nodes."
         for p in inp_params+['Eg', 'C_dop']:
@@ -619,7 +623,8 @@ class LaserDiode(object):
                                     bounds_error=False, fill_value=0)
         self._calc_wg_mode()
 
-        return x, n, mode
+        # return calculated mode profiles
+        return x, modes, gammas
 
     def _calc_wg_mode(self):
         "Calculate normalized laser mode profile and store in `self.yin`."
