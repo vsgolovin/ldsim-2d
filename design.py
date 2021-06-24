@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """
+Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
 import numpy as np

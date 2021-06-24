@@ -1655,7 +1655,7 @@ class LaserDiode(object):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from sample_design import sd
+    from sample_design1d import sd
 
     plt.rc('lines', linewidth=0.7)
     plt.rc('figure.subplot', left=0.15, right=0.85)
