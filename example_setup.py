@@ -22,7 +22,7 @@ ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
 # see method docstring for detailed description
 x, y, step = \
     ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, step_uni=5e-8,
-                           sigma=1e-5, y_ext=[0.5, 0.5])
+                           sigma=1e-5, y_ext=[0.3, 0.3])
 # x -- initial (uniform) mesh nodes used for generating nonuniform mesh
 # y -- bandgap values at x
 # step -- nonuniform mesh nodes' spacing, inversely proportional to change in y
@@ -53,5 +53,3 @@ plt.xlabel(r'$x$ ($\mu$m)')
 plt.twinx()
 plt.plot(ld.xin*1e4, ld.yin['n_refr'], 'k:', lw=0.5)
 plt.ylabel('Refractive index')
-
-plt.show()

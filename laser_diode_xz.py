@@ -1668,7 +1668,8 @@ if __name__ == '__main__':
 
     # 1. nonuniform mesh
     print('Generating a nonuniform mesh...', end=' ')
-    ld.gen_nonuniform_mesh(param='Eg', y_ext=[0.3, 0.3])
+    ld.gen_nonuniform_mesh(param='Eg', step_min=1e-7, step_max=20e-7,
+                           sigma=1e-5, y_ext=[0.3, 0.3])
     print('Complete.')
     x = ld.xin*1e4
     plt.figure('Flat bands')

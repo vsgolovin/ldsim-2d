@@ -16,7 +16,8 @@ export_folder = 'results'
 # set up the problem
 ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
                 lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
-ld.gen_nonuniform_mesh(step_min=5e-8, step_max=20e-7, y_ext=[0.5, 0.5])
+ld.gen_nonuniform_mesh(step_min=1e-9, step_max=20e-7, sigma=1e-5,
+                       y_ext=[0.3, 0.3])
 ld.make_dimensionless()
 ld.solve_waveguide(remove_layers=(1, 1))  # ignore contact layers
 ld.solve_equilibrium()
