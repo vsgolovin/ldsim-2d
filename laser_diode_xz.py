@@ -68,7 +68,7 @@ class LaserDiode(object):
         has_active_region = False
         self.ar_inds = list()
         for i, layer in enumerate(epi):
-            assert [np.nan] not in layer.d.values()
+            assert True not in [list(yi) == [np.nan] for yi in layer.d.values()]
             if layer.active:
                 has_active_region = True
                 self.ar_inds.append(i)

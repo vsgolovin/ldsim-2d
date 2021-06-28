@@ -94,6 +94,23 @@ class Layer(object):
             p_Nd = np.concatenate([np.zeros(-delta), p_Nd])
         self.d['C_dop'] = p_Nd - p_Na
 
+    def make_gradient_layer(self, l2, name, dx, active=False, deg=1):
+        """
+        Create a layer where all parameters gradually change from their
+        endvalues in the current layer to values in `l2` at x = 0.
+        By default all parameters change linearly, this can be change by
+        increasing polynomial degree `deg`.
+        """
+        lnew = Layer(name=name, dx=dx, active=active)
+        x = np.array([0, dx])
+        y = np.zeros(2)
+        for key in self.d:
+            y[0] = self.calculate(key, self.dx)
+            y[1] = l2.calculate(key, 0)
+            p = np.polyfit(x=x, y=y, deg=deg)
+            lnew.update({key: p})
+        return lnew
+
 
 class EpiDesign(list):
     "A list of `Layer` objects."
@@ -162,6 +179,7 @@ if __name__ == '__main__':
     nwg = Layer(name='n-waveguide', dx=0.5e-4)
     nwg.update(d25)
     nwg.update({'Nd': 1e17})
+    grad_ncl_nwg = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
     act = Layer(name='active', dx=100e-7, active=True)
     act.update(d0)
     act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
@@ -171,8 +189,9 @@ if __name__ == '__main__':
     pcl = Layer(name='p-cladding', dx=1.5e-4)
     pcl.update(d40)
     pcl.update({'Na': 1e18})
+    grad_pwg_pcl = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
-    pin = EpiDesign((ncl, nwg, act, pwg, pcl))
+    pin = EpiDesign((ncl, grad_ncl_nwg, nwg, act, pwg, grad_pwg_pcl, pcl))
     x = np.linspace(0, pin.get_thickness(), 5000)
     inds, dx = pin._inds_dx(x)
     Ec = pin.calculate('Ec', x, inds, dx)
