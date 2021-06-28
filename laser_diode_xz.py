@@ -12,7 +12,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from scipy.linalg import solve_banded
 from scipy import sparse
-from design_1d import Design1D
+import design
 import constants as const
 import units
 import carrier_concentrations as cc
@@ -24,15 +24,15 @@ import flux
 import recombination as rec
 import sdf
 
-inp_params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
-              'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr']
+yin_params = ['Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n',
+              'mu_p', 'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr',
+              'g0', 'N_tr', 'fca_e', 'fca_h']
 ybn_params = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 
 
 class LaserDiode(object):
 
-    def __init__(self, design, ar_inds, L, w, R1, R2,
-                 lam, ng, alpha_i, beta_sp):
+    def __init__(self, epi, L, w, R1, R2, lam, ng, alpha_i, beta_sp):
         """
         Class for storing all the model parameters of a 1D/2D laser diode.
         Initialized as a 1D model, as there is no difference between
@@ -40,10 +40,8 @@ class LaserDiode(object):
 
         Parameters
         ----------
-        design : design_1d.Design1D
-            A `Design_1D` object with all necessary physical parameters.
-        ar_inds : number or list of numbers
-            Indices of active region layers in `design`.
+        epi : design.EpiDesign
+            Epitaxial design.
         L : number
             Resonator length (cm).
         w : number
@@ -65,23 +63,22 @@ class LaserDiode(object):
 
         """
         # checking if all the necessary parameters were specified
-        # and if active region indices correspond to actual layers
-        assert isinstance(design, Design1D)
-        inds = list()
-        for ind, layer in design.layers.items():
-            inds.append(ind)
-            layer.check(inp_params)  # raises exception if fails
-        if isinstance(ar_inds, int):
-            self.ar_inds = [ar_inds]
-        assert all([ar_ind in inds for ar_ind in self.ar_inds])
-        self.design = design
+        # and if there is an active region
+        assert isinstance(epi, design.EpiDesign)
+        has_active_region = False
+        self.ar_inds = list()
+        for i, layer in enumerate(epi):
+            assert [np.nan] not in layer.d.values()
+            if layer.active:
+                has_active_region = True
+                self.ar_inds.append(i)
+        assert has_active_region
+        self.epi = epi
 
         # constants
         self.Vt = const.kb*const.T
         self.q = const.q
         self.eps_0 = const.eps_0
-        self.fca_e = const.fca_e
-        self.fca_h = const.fca_h
 
         # device parameters
         self.L = L
@@ -126,12 +123,13 @@ class LaserDiode(object):
         Generate a uniform mesh with a specified `step`. Should result with at
         least 50 nodes, otherwise raises an exception.
         """
-        d = self.design.get_thickness()
+        d = self.epi.get_thickness()
         if d/step < 50:
             raise Exception("Mesh step (%f) is too large." % step)
         self.xin = np.arange(0, d, step)
         self.xbn = (self.xin[1:]+self.xin[:-1]) / 2
-        self.mx = len(self.xin)  # number of grid nodes
+        self.nx = len(self.xin)  # number of grid nodes
+        self.ar_ix = self._get_ar_ix()
         if calc_params:
             self.calc_all_params()
 
@@ -198,6 +196,7 @@ class LaserDiode(object):
         self.xin = np.array(new_grid)
         self.xbn = (self.xin[1:] + self.xin[:-1]) / 2
         self.nx = len(self.xin)
+        self.ar_ix = self._get_ar_ix()
         self.calc_all_params()
 
         # return grid nodes, values of `param` at grid nodes
@@ -206,18 +205,22 @@ class LaserDiode(object):
 
     def calc_all_params(self):
         "Calculate all parameters' values at mesh nodes."
-        for p in inp_params+['Eg', 'C_dop']:
-            self._calculate_param(p, 'i')
+        inds, dx = self.epi._inds_dx(self.xin)
+        for p in yin_params:
+            if p in design.params_active:
+                continue
+            self._calculate_param(p, 'i', inds, dx)
+        inds, dx = inds[self.ar_ix], dx[self.ar_ix]
+        for p in design.params_active:
+            self._calculate_param(p, 'i', inds, dx)
+        inds, dx = self.epi._inds_dx(self.xbn)
         for p in ybn_params:
-            self._calculate_param(p, 'b')
+            inds, dx = self.epi._inds_dx(self.xbn)
+            self._calculate_param(p, 'b', inds, dx)
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
-        inds = np.array([self.design.get_index(xi) for xi in self.xin])
-        self.ar_ix = np.zeros(self.xin.shape, dtype=bool)
-        for ind in self.ar_inds:
-            self.ar_ix |= (inds == ind)
 
-    def _calculate_param(self, p, nodes='internal'):
+    def _calculate_param(self, p, nodes='internal', inds=None, dx=None):
         """
         Calculate values of parameter `p` at all mesh nodes.
 
@@ -228,6 +231,10 @@ class LaserDiode(object):
         nodes : str, optional
             Which mesh nodes -- `internal` (`i`) or `boundary` (`b`) -- should
             the values be calculated at. The default is 'internal'.
+        inds : numpy.ndarray or None
+            Layer index for each node.
+        dx : numpy.ndarray or None
+            Distance from layer left boundary for each node.
 
         Raises
         ------
@@ -235,34 +242,38 @@ class LaserDiode(object):
             If `p` is an unknown parameter name.
 
         """
+        assert not self.is_dimensionless
         # picking nodes
-        if nodes == 'internal' or nodes == 'i':
-            x = self.xin
+        if p in design.params_active:
+            assert nodes in ('i', 'internal')
+            x = self.xin[self.ar_ix]
             d = self.yin
-        elif nodes == 'boundary' or nodes == 'b':
-            x = self.xbn
-            d = self.ybn
+        elif p not in design.params:
+            raise Exception('Error: unknown parameter %s' % p)
+        else:
+            if nodes == 'internal' or nodes == 'i':
+                x = self.xin
+                d = self.yin
+            elif nodes == 'boundary' or nodes == 'b':
+                x = self.xbn
+                d = self.ybn
 
         # calculating values
-        dtype = np.dtype('float64')
-        if p in inp_params:
-            y = np.array([self.design.get_value(p, xi) for xi in x],
-                         dtype=dtype)
-        elif p == 'Eg':
-            Ec = np.array([self.design.get_value('Ec', xi) for xi in x],
-                          dtype=dtype)
-            Ev = np.array([self.design.get_value('Ev', xi) for xi in x],
-                          dtype=dtype)
-            y = Ec - Ev
-        elif p == 'C_dop':
-            Nd = np.array([self.design.get_value('Nd', xi) for xi in x],
-                          dtype=dtype)
-            Na = np.array([self.design.get_value('Na', xi) for xi in x],
-                          dtype=dtype)
-            y = Nd - Na
-        else:
-            raise Exception('Error: unknown parameter %s' % p)
+        y = self.epi.calculate(p, x, inds, dx)
         d[p] = y  # modifies self.yin or self.ybn
+
+    def _get_ar_ix(self, x=None, epi=None):
+        "Mask for x, where elements belong to active region."
+        if x is None:
+            x = self.xin
+        if epi is None:
+            epi = self.epi
+        bnds = epi.boundaries()
+        ar_ix = np.zeros_like(x, dtype=bool)
+        ar_inds = [i for i, lr in enumerate(epi) if lr.active]
+        for ind in ar_inds:
+            ar_ix |= np.logical_and(x > bnds[ind], x <= bnds[ind+1])
+        return ar_ix
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
@@ -273,8 +284,6 @@ class LaserDiode(object):
         self.Vt /= units.V
         self.q /= units.q
         self.eps_0 /= units.q/(units.x*units.V)
-        self.fca_e /= 1/(units.n*units.x)
-        self.fca_h /= 1/(units.n*units.x)
 
         # device parameters
         self.L /= units.x
@@ -318,8 +327,6 @@ class LaserDiode(object):
         self.Vt *= units.V
         self.q *= units.q
         self.eps_0 *= units.q/(units.x*units.V)
-        self.fca_e *= 1/(units.n*units.x)
-        self.fca_h *= 1/(units.n*units.x)
 
         # device parameters
         self.L *= units.x
@@ -578,27 +585,19 @@ class LaserDiode(object):
             layers.
 
         """
-        # generating refractive index profile
-        x = np.arange(0, self.design.get_thickness(), step)
-        n = np.array([self.design.get_value('n_refr', xi) for xi in x])
-        inds = np.array([self.design.get_index(xi) for xi in x], dtype=int)
-
-        # removing boundary layers (if needed)
+        # remove outer layers if needed
         i1, i2 = remove_layers
-        to_remove = self.design.inds[:i1]
-        if i2 > 0:
-            to_remove += self.design.inds[-i2:]
-        ix = np.array([True]*len(inds))
-        for layer_index in to_remove:
-            ix = np.logical_and(ix, inds!=layer_index)
-        x = x[ix]
-        n = n[ix]
-        inds = inds[ix]
+        if i2 == 0:
+            epi = design.EpiDesign(self.epi[i1:])
+        else:
+            assert i2 > 0
+            epi = design.EpiDesign(self.epi[i1:-i2])
+        x0 = self.epi.boundaries()[i1]
 
-        # active region location
-        ar_ix = np.array([True]*len(inds))
-        for layer_index in self.ar_inds:
-            ar_ix = np.logical_and(ar_ix, inds==layer_index)
+        # generating refractive index profile
+        x = x0 + np.arange(0, epi.get_thickness(), step)[1:]
+        n = self.epi.calculate('n_refr', x)
+        ar_ix = self._get_ar_ix(x, self.epi)
 
         # solving the eigenvalue problem
         if self.is_dimensionless:
@@ -1354,8 +1353,8 @@ class LaserDiode(object):
         # aliases
         n = self.sol['n'][self.ar_ix]
         p = self.sol['p'][self.ar_ix]
-        g0 = self.yin['g0'][self.ar_ix]
-        N_tr = self.yin['N_tr'][self.ar_ix]
+        g0 = self.yin['g0']
+        N_tr = self.yin['N_tr']
 
         # g = g0 * ln(min(n,p) / N_tr)
         N = p.copy()
@@ -1390,6 +1389,8 @@ class LaserDiode(object):
         "Calculate free-carrier absorption."
         T = self.yin['wg_mode'][1:-1]
         w = self.xbn[1:] - self.xbn[:-1]
+        fca_e = self.yin['fca_e'][1:-1]
+        fca_h = self.yin['fca_h'][1:-1]
         if n is None:
             n = self.sol['n'][1:-1]
         else:
@@ -1398,7 +1399,7 @@ class LaserDiode(object):
             p = self.sol['p'][1:-1]
         else:
             p = p[1:-1]
-        arr = T*w*(n*self.fca_e + p*self.fca_h)
+        arr = T * w * (n * fca_e + p * fca_h)
         return np.sum(arr)
 
     # extract useful data from simulation results
@@ -1655,17 +1656,14 @@ class LaserDiode(object):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from sample_design1d import sd
+    from sample_design import epi
 
     plt.rc('lines', linewidth=0.7)
     plt.rc('figure.subplot', left=0.15, right=0.85)
 
     print('Creating an instance of LaserDiode1D...', end=' ')
-    ld = LaserDiode(design=sd, ar_inds=10,
-                    L=3000e-4, w=100e-4,
-                    R1=0.95, R2=0.05,
-                    lam=0.87e-4, ng=3.9,
-                    alpha_i=0.5, beta_sp=1e-4)
+    ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
+                    lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
     print('Complete.')
 
     # 1. nonuniform mesh
@@ -1721,7 +1719,7 @@ if __name__ == '__main__':
     # 4. forward bias
     nsteps = 500
     ld.make_dimensionless()
-    print('Solving drift-diffution system at small forward bias...',
+    print('Solving drift-diffusion system at small forward bias...',
           end=' ')
     ld.apply_voltage(0.1)
     for _ in range(nsteps):

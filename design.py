@@ -102,7 +102,7 @@ class EpiDesign(list):
 
     def boundaries(self):
         "Get an array of layer boundaries."
-        return np.cumsum([layer.dx for layer in self])
+        return np.cumsum([0.0] + [layer.dx for layer in self])
 
     def get_thickness(self):
         "Get sum of all layers' thicknesses."
@@ -136,7 +136,8 @@ class EpiDesign(list):
                 inds, dx = self._inds_dx(x)
             for i, layer in enumerate(self):
                 ix = (inds == i)
-                y[ix] = layer.calculate(param, dx[ix])
+                if ix.any():
+                    y[ix] = layer.calculate(param, dx[ix])
         return y
 
 

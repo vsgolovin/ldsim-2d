@@ -5,7 +5,7 @@ of a laser diode with design described in `sample_design.py`.
 """
 
 import matplotlib.pyplot as plt
-from sample_design import sd
+from sample_design import epi
 from laser_diode_xz import LaserDiode
 
 # change default Matplotlib settings
@@ -15,11 +15,8 @@ plt.rc('figure.subplot', left=0.15, right=0.85)
 # create an instance of `LaserDiode` class
 # all parameters except for `ar_inds` (active region layer indices)
 # are actually irrelevant in this case
-ld = LaserDiode(design=sd, ar_inds=10,
-                L=3000e-4, w=100e-4,
-                R1=0.95, R2=0.05,
-                lam=0.87e-4, ng=3.9,
-                alpha_i=0.5, beta_sp=1e-4)
+ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
+                lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
 
 # generate nonuniform mesh
 # see method docstring for detailed description
@@ -43,7 +40,7 @@ plt.ylabel('$E_g$ (eV)')
 
 # calculate waveguide mode profile
 n_modes = 3  # number of modes to find
-x_wg, modes, gammas = ld.solve_waveguide(step=1e-7, n_modes=n_modes,
+x_wg, modes, gammas = ld.solve_waveguide(step=1e-8, n_modes=n_modes,
                                          remove_layers=(1, 1))
 plt.figure('Waveguide mode')
 for i in range(n_modes):
@@ -56,3 +53,5 @@ plt.xlabel(r'$x$ ($\mu$m)')
 plt.twinx()
 plt.plot(ld.xin*1e4, ld.yin['n_refr'], 'k:', lw=0.5)
 plt.ylabel('Refractive index')
+
+plt.show()

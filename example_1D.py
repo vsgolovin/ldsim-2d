@@ -6,7 +6,7 @@ Calculate P-I and J-V curves for a laser diode with design described in
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sample_design import sd
+from sample_design import epi
 from laser_diode_xz import LaserDiode
 
 # export settings
@@ -14,12 +14,9 @@ export = True
 export_folder = 'results'
 
 # set up the problem
-ld = LaserDiode(design=sd, ar_inds=10,
-                L=3000e-4, w=100e-4,
-                R1=0.95, R2=0.05,
-                lam=0.87e-4, ng=3.9,
-                alpha_i=0.5, beta_sp=1e-4)
-ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, y_ext=[0.5, 0.5])
+ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
+                lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
+ld.gen_nonuniform_mesh(step_min=5e-8, step_max=20e-7, y_ext=[0.5, 0.5])
 ld.make_dimensionless()
 ld.solve_waveguide(remove_layers=(1, 1))  # ignore contact layers
 ld.solve_equilibrium()
@@ -42,7 +39,7 @@ for i, v in enumerate(voltages):
     # track convergence with fluctuation
     # i.e., ratio of update vector and solution L2 norms
     fluct = 1  # initial value
-    while fluct > 1e-8:  # perform Newton's method iterations
+    while fluct > 5e-8:  # perform Newton's method iterations
         # choose value of damping parameter `omega`
         # depending on fluctuation
         if fluct > 1e-3:

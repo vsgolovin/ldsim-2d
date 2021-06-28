@@ -18,7 +18,7 @@ def solve_wg(x, n, lam, n_modes):
     n : numpy.ndarray
         Refractive index values. `n.shape==x.shape`
     lam : number
-        Wavelength (cm).
+        Wavelength, same units as `x`.
     n_modes : int
         Number of eigenvalues/eigenvectors to be calculated.
 
