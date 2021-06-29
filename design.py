@@ -141,6 +141,48 @@ class EpiDesign(list):
         return y
 
 
+class Design2D(object):
+    "Vertical-lateral (x-y) laser diode design."
+    def __init__(self, epi, width):
+        """
+        Parameters
+        ----------
+        epi : EpiDesign
+            Epitaxial design.
+        width : float
+            Device total width (cm).
+        """
+        self.epi = epi
+        self.ymax = width
+        self.xmax = epi.get_thickness()
+        # trench parameters
+        self.dx = 0.0  # trench depth
+        self.y1 = 0.0
+        self.y2 = self.ymax / 3
+
+    def inside(self, x, y):
+        assert y <= self.ymax
+        if y > self.ymax / 2:
+            y = self.ymax - y
+        if y < self.y1:
+            return x <= (self.xmax - self.dx)
+        elif y < self.y2:
+            k = self.dx / (self.y2 - self.y1)
+            return x <= ((self.xmax - self.dx) + (y - self.y1) * k)
+        else:
+            return x <= self.xmax
+
+    def add_trenches(self, y1, y2, dx):
+        """
+        Add two trenches width depth `dx` to both sides of the device.
+        """
+        assert y1 < self.ymax / 2 and y2 < self.ymax / 2
+        self.y1 = y1
+        self.y2 = y2
+        assert dx < self.xmax
+        self.dx = dx
+
+
 if __name__ == '__main__':
 
     d0 = dict(Ev=0.0, Ec=1.424, Nc=4.7e17, Nv=9.0e18, mu_n=8000,
@@ -173,18 +215,23 @@ if __name__ == '__main__':
     pcl.update({'Na': 1e18})
 
     pin = EpiDesign((ncl, nwg, act, pwg, pcl))
-    x = np.linspace(0, pin.get_thickness(), 5000)
-    inds, dx = pin._inds_dx(x)
-    Ec = pin.calculate('Ec', x, inds, dx)
-    Ev = pin.calculate('Ev', x)
-    n_refr = pin.calculate('n_refr', x, inds, dx)
-    for param in params:
-        pin.calculate(param, x, inds, dx)
+    cs = Design2D(pin, 130e-4)
+    cs.add_trenches(y1=10e-4, y2=20e-4, dx=1.7e-4)
+
+    x = np.linspace(0, pin.get_thickness(), 1000)
+    y = np.linspace(0, cs.ymax, 121)
+
+    Z = np.zeros((len(x), len(y)), dtype='bool')
+    for i, xi in enumerate(x):
+        for j, yj in enumerate(y):
+            Z[i, j] = cs.inside(xi, yj)
+
+    Eg = pin.calculate('Eg', x)
+    Eg_2D = np.repeat(Eg, len(y)).reshape(len(x), len(y))
+    Eg_2D[Z == False] = 0.0
 
     import matplotlib.pyplot as plt
+    plt.close('all')
     plt.figure()
-    plt.plot(x, Ec, 'b-')
-    plt.plot(x, Ev, 'r-')
-    plt.twinx()
-    plt.plot(x, n_refr, 'g:')
+    plt.contourf(y, x, Eg_2D, cmap=plt.cm.Blues)
     plt.show()
