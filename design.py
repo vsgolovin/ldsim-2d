@@ -233,16 +233,6 @@ if __name__ == '__main__':
     pcl.update({'Na': 1e18})
     grad_pwg_pcl = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
-<<<<<<< HEAD
-    pin = EpiDesign((ncl, grad_ncl_nwg, nwg, act, pwg, grad_pwg_pcl, pcl))
-    x = np.linspace(0, pin.get_thickness(), 5000)
-    inds, dx = pin._inds_dx(x)
-    Ec = pin.calculate('Ec', x, inds, dx)
-    Ev = pin.calculate('Ev', x)
-    n_refr = pin.calculate('n_refr', x, inds, dx)
-    for param in params:
-        pin.calculate(param, x, inds, dx)
-=======
     pin = EpiDesign((ncl, nwg, act, pwg, pcl))
     cs = Design2D(pin, 130e-4)
     cs.add_trenches(y1=10e-4, y2=20e-4, dx=1.7e-4)
@@ -258,7 +248,6 @@ if __name__ == '__main__':
     Eg = pin.calculate('Eg', x)
     Eg_2D = np.repeat(Eg, len(y)).reshape(len(x), len(y))
     Eg_2D[Z == False] = 0.0
->>>>>>> 04f8ef02687c29fb0e44e7d1312c1a6894de951f
 
     import matplotlib.pyplot as plt
     plt.close('all')
