@@ -159,7 +159,10 @@ class EpiDesign(list):
 
 
 class Design2D(object):
-    "Vertical-lateral (x-y) laser diode design."
+    """
+    Vertical-lateral (x-y) laser diode design. Is always symmetrical
+    w.r.t. y axis, layer parameters are also independent of y.
+    """
     def __init__(self, epi, width):
         """
         Parameters
@@ -176,6 +179,9 @@ class Design2D(object):
         self.dx = 0.0  # trench depth
         self.y1 = 0.0
         self.y2 = self.ymax / 3
+        # contact location
+        self.bc_width = self.ymax  # bottom contact width
+        self.tc_width = self.ymax  # top contact width
 
     def inside(self, x, y):
         assert y <= self.ymax
@@ -191,13 +197,31 @@ class Design2D(object):
 
     def add_trenches(self, y1, y2, dx):
         """
-        Add two trenches width depth `dx` to both sides of the device.
+        Add two trenches with depth `dx` to both sides of the device.
         """
         assert y1 < self.ymax / 2 and y2 < self.ymax / 2
         self.y1 = y1
         self.y2 = y2
         assert dx < self.xmax
         self.dx = dx
+
+    def inside_bottom_contact(self, y):
+        assert y <= self.ymax
+        return abs(y - self.ymax / 2) <= self.bc_width / 2
+
+    def inside_top_contact(self, y):
+        assert y <= self.ymax
+        return abs(y - self.ymax / 2) <= self.tc_width / 2
+
+    def set_bottom_contact(self, width):
+        "Set the bottom ohmic contact width."
+        assert width <= self.ymax
+        self.bc_width = width
+
+    def set_top_contact(self, width):
+        "Set the top ohmic contact width."
+        assert width <= self.ymax
+        self.tc_width = width
 
 
 if __name__ == '__main__':
@@ -236,6 +260,8 @@ if __name__ == '__main__':
     pin = EpiDesign((ncl, nwg, act, pwg, pcl))
     cs = Design2D(pin, 130e-4)
     cs.add_trenches(y1=10e-4, y2=20e-4, dx=1.7e-4)
+    cs.set_bottom_contact(120e-4)
+    cs.set_top_contact(60e-4)
 
     x = np.linspace(0, pin.get_thickness(), 1000)
     y = np.linspace(0, cs.ymax, 121)
@@ -248,9 +274,20 @@ if __name__ == '__main__':
     Eg = pin.calculate('Eg', x)
     Eg_2D = np.repeat(Eg, len(y)).reshape(len(x), len(y))
     Eg_2D[Z == False] = 0.0
+    for j, yj in enumerate(y):
+        if cs.inside_bottom_contact(yj):
+            Eg_2D[0, j] = 3.0
+        if cs.inside_top_contact(yj):
+            Eg_2D[-1, j] = 3.0
 
     import matplotlib.pyplot as plt
     plt.close('all')
     plt.figure()
     plt.contourf(y, x, Eg_2D, cmap=plt.cm.Blues)
+    x1, x2 = plt.xlim()
+    xspan = x2 - x1
+    plt.xlim(x1 - 1e-2*xspan, x2 + 1e-2*xspan)
+    y1, y2 = plt.ylim()
+    yspan = y2 - y1
+    plt.ylim(y1 - 1e-2*yspan, y2 + 1e-2*yspan)
     plt.show()
