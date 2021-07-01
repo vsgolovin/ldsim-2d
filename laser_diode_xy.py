@@ -4,8 +4,14 @@
 """
 
 import numpy as np
+from scipy.interpolate import interp1d
 import design
 import constants as const
+
+params_n = ['Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n',
+            'mu_p', 'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr',
+            'g0', 'N_tr', 'fca_e', 'fca_h']
+params_b = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 
 
 class LaserDiode(object):
@@ -55,6 +61,47 @@ class LaserDiode(object):
         self.mesh['yb'] = np.linspace(0, self.dsgn.get_width(), ny)
         self._update_mesh()
 
+    def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7, step_uni=5e-8,
+                            sigma=100e-7, y_ext=[0., 0.], ny=100):
+        def gauss(x, mu, sigma):
+            return np.exp(-(x-mu)**2 / (2*sigma**2))
+
+        # uniform y mesh
+        self.mesh['yb'] = np.linspace(0, self.dsgn.get_width(), ny)
+
+        # temporary uniform x mesh
+        thickness = dsgn.get_thickness()
+        nx = int(round(thickness / step_uni))
+        x = np.linspace(0, thickness, nx)
+
+        # calculate bandgap
+        Eg = np.zeros(len(x) + 2)
+        Eg[1:-1] = self.dsgn.epi.calculate('Eg', x)
+        # external values for fine grid at boundaries
+        for i, j in zip(range(2), [1, -2]):
+            if not isinstance(y_ext[i], (float, int)):
+                y_ext[i] = Eg[j]
+        Eg[0] = y_ext[0]
+        Eg[-1] = y_ext[1]
+
+        # function for choosing local step size
+        f = np.abs(Eg[2:] - Eg[:-2])  # change of y at every point
+        fg = np.zeros_like(f)  # convolution for smoothing
+        for i, xi in enumerate(x):
+            g = gauss(x, xi, sigma)
+            fg[i] = np.sum(f * g)
+        fg_fun = interp1d(x, fg / fg.max())
+
+        # generate new mesh
+        k = step_max - step_min
+        new_mesh = list()
+        xi = 0
+        while xi <= thickness:
+            new_mesh.append(xi)
+            xi += step_min + k*(1 - fg_fun(xi))
+        self.mesh['xb'] = np.array(new_mesh)
+        self._update_mesh()
+
     def _update_mesh(self):
         xb = self.mesh['xb']         # volume boundaries
         xn = (xb[1:] + xb[:-1]) / 2  # nodes
@@ -94,7 +141,7 @@ if __name__ == '__main__':
     dsgn.set_bottom_contact(18e-4)
 
     ld = LaserDiode(dsgn, 2000e-4, 0.3, 0.3, 0.87e-4, 3.9, 0.5, 1e-4)
-    ld.gen_uniform_mesh(150, 100)
+    ld.gen_nonuniform_mesh()
     x = ld.mesh['xn']
     y = ld.mesh['yn']
     mx = ld.mesh['mx']
