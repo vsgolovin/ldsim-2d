@@ -183,6 +183,12 @@ class Design2D(object):
         self.bc_width = self.ymax  # bottom contact width
         self.tc_width = self.ymax  # top contact width
 
+    def get_thickness(self):
+        return self.epi.get_thickness()
+
+    def get_width(self):
+        return self.ymax
+
     def inside(self, x, y):
         assert y <= self.ymax
         if y > self.ymax / 2:
