@@ -57,9 +57,9 @@ class LaserDiode(object):
         self.sol = dict()
 
     def gen_uniform_mesh(self, nx, ny):
-        self.mesh['xb'] = np.linspace(0, self.dsgn.get_thickness(), nx)
-        self.mesh['yb'] = np.linspace(0, self.dsgn.get_width(), ny)
-        self._update_mesh()
+        xb = np.linspace(0, self.dsgn.get_thickness(), nx + 1)
+        yb = np.linspace(0, self.dsgn.get_width(), ny + 1)
+        self.mesh = self._make_mesh(xb, yb)
 
     def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7, step_uni=5e-8,
                             sigma=100e-7, y_ext=[0., 0.], ny=100):
@@ -67,10 +67,10 @@ class LaserDiode(object):
             return np.exp(-(x-mu)**2 / (2*sigma**2))
 
         # uniform y mesh
-        self.mesh['yb'] = np.linspace(0, self.dsgn.get_width(), ny)
+        yb = np.linspace(0, self.dsgn.get_width(), ny)
 
         # temporary uniform x mesh
-        thickness = dsgn.get_thickness()
+        thickness = self.dsgn.get_thickness()
         nx = int(round(thickness / step_uni))
         x = np.linspace(0, thickness, nx)
 
@@ -99,36 +99,31 @@ class LaserDiode(object):
         while xi <= thickness:
             new_mesh.append(xi)
             xi += step_min + k*(1 - fg_fun(xi))
-        self.mesh['xb'] = np.array(new_mesh)
-        self._update_mesh()
+        xb = np.array(new_mesh)
+        self.mesh = self._make_mesh(xb, yb)
 
-    def _update_mesh(self):
-        xb = self.mesh['xb']         # volume boundaries
-        xn = (xb[1:] + xb[:-1]) / 2  # nodes
-        hx = xn[1:] - xn[:-1]        # spacing between nodes
-        wx = xb[1:] - xb[:-1]        # finite volume sizes
-        yb = self.mesh['yb']         # same for y axis
-        yn = (yb[1:] + yb[:-1]) / 2
-        hy = yn[1:] - yn[:-1]
-        wy = yb[1:] - yb[:-1]
+    def _make_mesh(self, xb, yb):
+        msh = dict()
+        msh['xn'] = (xb[1:] + xb[:-1]) / 2          # nodes
+        msh['hx'] = msh['xn'][1:] - msh['xn'][:-1]  # spacing between nodes
+        msh['wx'] = xb[1:] - xb[:-1]                # finite volume sizes
+        msh['yn'] = (yb[1:] + yb[:-1]) / 2
+        msh['hy'] = msh['yn'][1:] - msh['yn'][:-1]
+        msh['wy'] = yb[1:] - yb[:-1]
 
         # number of x mesh points for every yn
-        self.mesh['mx'] = np.zeros(len(yn), dtype=int)
-        self.mesh['tc'] = np.zeros(len(yn), dtype=bool)
-        self.mesh['bc'] = np.zeros(len(yn), dtype=bool)
-        for j, yj in enumerate(yn):
-            for xi in xn:
+        my = len(msh['yn'])
+        msh['mx'] = np.zeros(my, dtype=int)
+        msh['tc'] = np.zeros(my, dtype=bool)
+        msh['bc'] = np.zeros(my, dtype=bool)
+        for j, yj in enumerate(msh['yn']):
+            for xi in msh['xn']:
                 if self.dsgn.inside(xi, yj):
-                    self.mesh['mx'][j] += 1
-                self.mesh['tc'][j] = self.dsgn.inside_top_contact(yj)
-                self.mesh['bc'][j] = self.dsgn.inside_bottom_contact(yj)
+                    msh['mx'][j] += 1
+                msh['tc'][j] = self.dsgn.inside_top_contact(yj)
+                msh['bc'][j] = self.dsgn.inside_bottom_contact(yj)
 
-        self.mesh['xn'] = xn
-        self.mesh['hx'] = hx
-        self.mesh['wx'] = wx
-        self.mesh['yn'] = yn
-        self.mesh['hy'] = hy
-        self.mesh['wy'] = wy
+        return msh
 
 
 if __name__ == '__main__':
