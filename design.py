@@ -50,10 +50,6 @@ class Layer(object):
     def __str__(self):
         return self.name
 
-    def __eq__(self, other_name):
-        assert isinstance(other_name, str)
-        return self.name == other_name
-
     def calculate(self, param, x):
         "Calculate value of parameter `param` at location `x`."
         p = self.d[param]
@@ -141,6 +137,15 @@ class EpiDesign(list):
         for i, xi in enumerate(x):
             inds[i], dx[i] = self._ind_dx(xi)
         return inds, dx
+
+    def _get_ixa(self, x):
+        "Get mask for selecting `x` elements belonging to active layers."
+        inds, _ = self._inds_dx(x)
+        ixa = np.zeros_like(x, dtype=bool)
+        for i, layer in enumerate(self):
+            if layer.active:
+                ixa |= (inds == i)
+        return ixa
 
     def calculate(self, param, x, inds=None, dx=None):
         "Calculate values of `param` at locations `x`."

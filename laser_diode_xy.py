@@ -4,9 +4,11 @@
 """
 
 import numpy as np
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, RectBivariateSpline
 import design
 import constants as const
+import waveguide as wg
+import units
 
 params_n = ['Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n',
             'mu_p', 'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr',
@@ -17,7 +19,33 @@ params_b = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 class LaserDiode(object):
 
     def __init__(self, dsgn, L, R1, R2, lam, ng, alpha_i, beta_sp):
-        ""
+        """
+        Class for storing all the model parameters of a 2D laser diode.
+
+        Parameters
+        ----------
+        dsgn : design.Design2D
+            Vertical-lateral laser design.
+        L : float
+            Resonator length (cm).
+        w : float
+            Stripe width (cm).
+        R1 : float
+            Back (x=0) mirror reflectivity (0<`R1`<=1).
+        R2 : float
+            Front (x=L) mirror reflectivity (0<`R2`<=1).
+        lam : float
+            Operating wavelength (cm).
+        ng : number
+            Group refrative index.
+        alpha_i : number
+            Internal optical loss (cm-1). Should not include free-carrier
+            absorption.
+        beta_sp : float
+            Spontaneous emission factor, i.e., the fraction of spontaneous
+            emission that is coupled with the lasing mode.
+
+        """
         # check if all the necessary parameters were specified
         # and if there is an active region
         assert isinstance(dsgn, design.Design2D)
@@ -52,17 +80,28 @@ class LaserDiode(object):
         self.beta_sp = beta_sp
 
         self.mesh = dict()
-        self.vxn = dict()
-        self.vxb = dict()
+        self.vxn = dict()  # parameters' values at x mesh nodes
+        self.vxb = dict()  # -/- volume boundaries
+        self.wg_fun = lambda x, y: 0  # waveguide mode function
+        self.wg_mode = np.array([])   # array for current grid
         self.sol = dict()
 
     def gen_uniform_mesh(self, nx, ny):
+        """
+        Generate a uniform 2D mesh with `nx` nodes along the x axis and
+        `ny` nodes along the y axis.
+        """
         xb = np.linspace(0, self.dsgn.get_thickness(), nx + 1)
         yb = np.linspace(0, self.dsgn.get_width(), ny + 1)
         self.mesh = self._make_mesh(xb, yb)
 
-    def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7, step_uni=5e-8,
-                            sigma=100e-7, y_ext=[0., 0.], ny=100):
+    def gen_nonuniform_mesh(self, step_min=1e-7, step_max=20e-7,
+                            step_uni=5e-8, sigma=100e-7,
+                            y_ext=[0., 0.], ny=100):
+        """
+        Generate mesh which is uniform along the y axis and nonuniform
+        along the x axis. Uses local bandgap change to decide x mesh step.
+        """
         def gauss(x, mu, sigma):
             return np.exp(-(x-mu)**2 / (2*sigma**2))
 
@@ -103,6 +142,7 @@ class LaserDiode(object):
         self.mesh = self._make_mesh(xb, yb)
 
     def _make_mesh(self, xb, yb):
+        "Generate mesh from given volume boundaries."
         msh = dict()
         msh['xn'] = (xb[1:] + xb[:-1]) / 2          # nodes
         msh['hx'] = msh['xn'][1:] - msh['xn'][:-1]  # spacing between nodes
@@ -110,6 +150,7 @@ class LaserDiode(object):
         msh['yn'] = (yb[1:] + yb[:-1]) / 2
         msh['hy'] = msh['yn'][1:] - msh['yn'][:-1]
         msh['wy'] = yb[1:] - yb[:-1]
+        msh['ixa'] = self.dsgn.epi._get_ixa(msh['xn'])
 
         # number of x mesh points for every yn
         my = len(msh['yn'])
@@ -126,6 +167,78 @@ class LaserDiode(object):
         return msh
 
 
+    def solve_waveguide(self, nx=1000, ny=100, n_modes=3,
+                        remove_layers=(0, 0)):
+        """
+        Calculate 2D laser mode profile. Finds `n_modes` solutions of the
+        eigenvalue problem with the highest eigenvalues (effective
+        indices) and pick the one with the highest optical confinement
+        factor (active region overlap).
+
+        Parameters
+        ----------
+        nx : int, optional
+            Number of uniform grid nodes along the x (vertical) axis.
+        ny : int, optional
+            Number of uniform grid nodes along the x (vertical) axis.
+        n_modes: int, optional
+            Number of calculated eigenproblem solutions.
+        remove_layers : (int, int), optional
+            Number of layers to exclude from calculated refractive index
+            profile at each side of the device. Useful to exclude contact
+            layers.
+
+        """
+        # x and y coordinates for uniform mesh volume boundaries
+        xb = np.linspace(0, self.dsgn.get_thickness(), nx + 1)
+        yb = np.linspace(0, self.dsgn.get_width(), ny + 1)
+
+        # remove from xb and yb points belonging to layers
+        # that are to be removed from calculation
+        inds, _ = self.dsgn.epi._inds_dx(xb)
+        i2r = list()  # layer indices to remove
+        i2r += [i for i in range(remove_layers[0])]
+        imax = len(self.dsgn.epi)
+        i2r += [i for i in range(imax - remove_layers[1], imax)]
+        ix = np.ones_like(inds, dtype=bool)  # array of True
+        for i in i2r:
+            ix &= (inds != i)
+        xb = xb[ix]
+        nx = len(xb) - 1
+        # create rectangular uniform mesh
+        msh = self._make_mesh(xb, yb)
+
+        # create 1D arrays of all 2D mesh nodes
+        x = np.tile(msh['xn'], ny)
+        y = np.repeat(msh['yn'], nx)
+
+        # calculate refractive for each node
+        n_1D = self.dsgn.epi.calculate('n_refr', msh['xn'])
+        n = np.ones(len(msh['xn']) * ny)
+        for i, mx in enumerate(msh['mx']):
+            n[i*nx:i*nx+mx] = n_1D[:mx]
+
+        # solve the waveguide problem
+        # and choose the mode with the highest confinement factor
+        n_eff, modes = wg.solve_wg_2d(x, y, n, self.lam, n_modes, nx, ny)
+        w = msh['wx'][0] * msh['wy'][0]  # area of every finite volume
+        ixa = np.tile(msh['ixa'], ny)
+        gammas = np.zeros(n_modes)
+        for i in range(n_modes):
+            gammas[i] = np.sum(modes[ixa, i]) * w
+        i = np.argmax(gammas)
+        self.gamma = gammas[i]
+        self.n_eff = n_eff[i]
+        mode = modes[:, i]
+
+        # interpolate mode and store corresponding function
+        self.wg_fun = RectBivariateSpline(
+            msh['xn']/units.x, msh['yn']/units.x,
+            mode.reshape((ny, nx)).T * units.x**2)
+
+        return msh['xn'], msh['yn'], mode.reshape(ny, -1)
+
+
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     from sample_design import epi
@@ -136,25 +249,9 @@ if __name__ == '__main__':
     dsgn.set_bottom_contact(18e-4)
 
     ld = LaserDiode(dsgn, 2000e-4, 0.3, 0.3, 0.87e-4, 3.9, 0.5, 1e-4)
-    ld.gen_nonuniform_mesh()
-    x = ld.mesh['xn']
-    y = ld.mesh['yn']
-    mx = ld.mesh['mx']
-    x2D = np.zeros(int(mx.sum()))
-    y2D = np.zeros_like(x2D)
-    i = 0
-    for j in range(len(y)):
-        x2D[i:i+mx[j]] = x[:mx[j]]
-        y2D[i:i+mx[j]] = y[j]
-        i += mx[j]
-
-    y_tc = y[ld.mesh['tc']]
-    x_tc = np.repeat(x[-1], len(y_tc))
-    y_bc = y[ld.mesh['bc']]
-    x_bc = np.repeat(x[0], len(y_bc))
-
+    x, y, mode = ld.solve_waveguide(nx=1000, ny=100, n_modes=3,
+                                    remove_layers=(1, 1))
+    plt.close('all')
     plt.figure()
-    plt.plot(y2D*1e4, x2D*1e4, ls='none', marker='.', ms=1, color='b')
-    plt.plot(y_tc*1e4, x_tc*1e4, marker='.', ms=2, color='gold', ls='none')
-    plt.plot(y_bc*1e4, x_bc*1e4, marker='.', ms=2, color='gold', ls='none')
+    plt.contourf(y, x, mode.T)
     plt.show()
