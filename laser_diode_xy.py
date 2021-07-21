@@ -10,13 +10,14 @@ import constants as const
 import waveguide as wg
 import units
 
-params_n = ['Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n',
-            'mu_p', 'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr',
-            'g0', 'N_tr', 'fca_e', 'fca_h']
-params_b = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
-
 
 class LaserDiode(object):
+
+    params_n = ['Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n',
+                'mu_p', 'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr',
+                'fca_e', 'fca_h']
+    params_active = ['g0', 'N_tr']
+    params_b = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 
     def __init__(self, dsgn, L, R1, R2, lam, ng, alpha_i, beta_sp):
         """
@@ -85,6 +86,7 @@ class LaserDiode(object):
         self.wg_fun = lambda x, y: 0  # waveguide mode function
         self.wg_mode = np.array([])   # array for current grid
         self.sol = dict()
+        self.is_dimensionless = False
 
     def gen_uniform_mesh(self, nx, ny):
         """
@@ -144,9 +146,11 @@ class LaserDiode(object):
     def _make_mesh(self, xb, yb):
         "Generate mesh from given volume boundaries."
         msh = dict()
+        msh['xb'] = xb
         msh['xn'] = (xb[1:] + xb[:-1]) / 2          # nodes
         msh['hx'] = msh['xn'][1:] - msh['xn'][:-1]  # spacing between nodes
         msh['wx'] = xb[1:] - xb[:-1]                # finite volume sizes
+        msh['yb'] = yb
         msh['yn'] = (yb[1:] + yb[:-1]) / 2
         msh['hy'] = msh['yn'][1:] - msh['yn'][:-1]
         msh['wy'] = yb[1:] - yb[:-1]
@@ -166,6 +170,26 @@ class LaserDiode(object):
 
         return msh
 
+    def get_flattened_2d_mesh(self):
+        x = np.zeros(np.sum(self.mesh['mx']))
+        y = np.zeros_like(x)
+        i = 0
+        for j, mx in enumerate(self.mesh['mx']):
+            x[i:i+mx] = self.mesh['xn'][:mx]
+            y[i:i+mx] = self.mesh['yn'][j]
+            i += mx
+        return x, y
+
+    def get_value(self, p):
+        "Get mesh nodes and `p` parameter values as 1D arrays."
+        assert p in self.params_n
+        x, y = self.get_flattened_2d_mesh()
+        v = np.zeros_like(x)
+        i = 0
+        for mx in self.mesh['mx']:
+            v[i:i+mx] = self.vxn[p][:mx]
+            i += mx
+        return x, y, v
 
     def solve_waveguide(self, nx=1000, ny=100, n_modes=3,
                         remove_layers=(0, 0)):
@@ -238,6 +262,27 @@ class LaserDiode(object):
 
         return msh['xn'], msh['yn'], mode.reshape(ny, -1)
 
+    def calc_all_params(self):
+        "Calculate all parameters' values at mesh nodes and boundaries."
+        epi = self.dsgn.epi
+        inds, dx = epi._inds_dx(self.mesh['xn'])  # nodes
+        for p in self.params_n:
+            self.vxn[p] = epi.calculate(p, self.mesh['xn'], inds, dx)
+        ixa = self.mesh['ixa']
+        for p in self.params_active:
+            self.vxn[p] = epi.calculate(p, self.mesh['xn'][ixa],
+                                        inds=inds[ixa], dx=dx[ixa])
+        inds, dx = epi._inds_dx(self.mesh['xb'])  # boundaries
+        for p in self.params_b:
+            self.vxb[p] = epi.calculate(p, self.mesh['xb'], inds, dx)
+
+        # flattened 2D array for waveguide mode profile
+        x, y = self.get_flattened_2d_mesh()
+        if not self.is_dimensionless:
+            x /= units.x
+            y /= units.x
+        self.wg_mode = self.wg_fun(x=x, y=y, grid=False)
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -249,9 +294,13 @@ if __name__ == '__main__':
     dsgn.set_bottom_contact(18e-4)
 
     ld = LaserDiode(dsgn, 2000e-4, 0.3, 0.3, 0.87e-4, 3.9, 0.5, 1e-4)
-    x, y, mode = ld.solve_waveguide(nx=1000, ny=100, n_modes=3,
-                                    remove_layers=(1, 1))
+    ld.solve_waveguide(nx=1000, ny=100, n_modes=3,
+                       remove_layers=(1, 1))
+    ld.gen_nonuniform_mesh()
+    ld.calc_all_params()
+    x, y, Eg = ld.get_value('Eg')
+
     plt.close('all')
     plt.figure()
-    plt.contourf(y, x, mode.T)
+    plt.scatter(y, x, c=Eg, marker='s', s=2)
     plt.show()
