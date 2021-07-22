@@ -3,12 +3,16 @@
 2D (vertical-lateral or x-y) laser diode model.
 """
 
+import warnings
 import numpy as np
 from scipy.interpolate import interp1d, RectBivariateSpline
 import design
 import constants as const
 import waveguide as wg
 import units
+import carrier_concentrations as cc
+import equilibrium as eq
+import newton
 
 
 class LaserDiode(object):
@@ -182,7 +186,6 @@ class LaserDiode(object):
 
     def get_value(self, p):
         "Get mesh nodes and `p` parameter values as 1D arrays."
-        assert p in self.params_n
         x, y = self.get_flattened_2d_mesh()
         v = np.zeros_like(x)
         i = 0
@@ -244,7 +247,10 @@ class LaserDiode(object):
 
         # solve the waveguide problem
         # and choose the mode with the highest confinement factor
-        n_eff, modes = wg.solve_wg_2d(x, y, n, self.lam, n_modes, nx, ny)
+        lam = self.lam
+        if self.is_dimensionless:
+            lam *= units.x
+        n_eff, modes = wg.solve_wg_2d(x, y, n, lam, n_modes, nx, ny)
         w = msh['wx'][0] * msh['wy'][0]  # area of every finite volume
         ixa = np.tile(msh['ixa'], ny)
         gammas = np.zeros(n_modes)
@@ -283,6 +289,119 @@ class LaserDiode(object):
             y /= units.x
         self.wg_mode = self.wg_fun(x=x, y=y, grid=False)
 
+    def make_dimensionless(self):
+        "Make every parameter dimensionless."
+        if self.is_dimensionless:
+            return
+
+        # constants
+        self.Vt /= units.V
+        self.q /= units.q
+        self.eps_0 /= units.q / (units.x*units.V)
+
+        # device parameters
+        self.L /= units.x
+        self.alpha_m /= 1/units.x
+        self.lam /= units.x
+        self.photon_energy /= units.E
+        self.vg /= units.x/units.t
+        self.alpha_i /= 1/units.x
+
+        # arrays
+        for key in ['xn', 'xb', 'yn', 'yb']:
+            self.mesh[key] /= units.x
+        for d in [self.vxn, self.vxb, self.sol]:
+            for key in d:
+                d[key] /= units.dct[key]
+        self.wg_mode /= 1/units.x**2
+
+        self.is_dimensionless = True
+
+    def original_units(self):
+        "Convert every parameter back to original units."
+        if not self.is_dimensionless:
+            return
+
+        # constants
+        self.Vt *= units.v
+        self.q *= units.q
+        self.eps_0 *= units.q / (units.x*units.V)
+
+        # device parameters
+        self.L *= units.x
+        self.alpha_m *= 1/units.x
+        self.lam *= units.x
+        self.photon_energy *= units.E
+        self.vg *= units.x/units.t
+        self.alpha_i *= 1/units.x
+
+        # arrays
+        for key in ['xn', 'xb', 'yn', 'yb']:
+            self.mesh[key] *= units.x
+        for d in [self.vxn, self.vxb, self.sol]:
+            for key in d:
+                d[key] *= units.dct[key]
+        self.wg_mode *= 1/units.x**2
+
+        self.is_dimensionless = False
+
+    # local charge neutrality
+    def make_lcn_solver(self):
+        """
+        Make a `NewtonSolver` for electrostatic potential distribution
+        along the x axis at equilibrium assuming local charge neutrality.
+        """
+        v = self.vxn  # values at x mesh nodes
+
+        def f(psi):
+            n = cc.n(psi, 0, v['Nc'], v['Ec'], self.Vt)
+            p = cc.p(psi, 0, v['Nv'], self.vxn['Ev'], self.Vt)
+            return v['C_dop'] - n + p
+
+        def fdot(psi):
+            ndot = cc.dn_dpsi(psi, 0, v['Nc'], self.vxn['Ec'], self.Vt)
+            pdot = cc.dp_dpsi(psi, 0, v['Nv'], self.vxn['Ev'], self.Vt)
+            return -ndot + pdot
+
+        # initial guess using Boltzmann statistics
+        ni = eq.intrinsic_concentration(v['Nc'], v['Nv'],
+                                        v['Ec'], v['Ev'], self.Vt)
+        Ei = eq.intrinsic_level(v['Nc'], v['Nv'],
+                                v['Ec'], v['Ev'], self.Vt)
+        Ef_i = eq.Ef_lcn_boltzmann(v['C_dop'], ni, Ei, self.Vt)
+
+        return newton.NewtonSolver(f, fdot, Ef_i, lambda A, b: b/A)
+
+    def solve_lcn(self, maxiter=100, fluct=1e-12, omega=1.0):
+        """
+        Find potential distribution at zero external bias assuming local
+        charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newton's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reaching `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        sol = self.make_lcn_solver()
+        sol.solve(maxiter, fluct, omega)
+        if sol.fluct[-1] > fluct:
+            warnings.warn('LaserDiode.solve_lcn(): fluctuation ' +
+                          '%e exceeds %e.' % (sol.fluct[-1], fluct))
+
+        self.vxn['psi_lcn'] = sol.x.copy()
+        self.vxn['n0'] = cc.n(psi=self.vxn['psi_lcn'], phi_n=0,
+                              Nc=self.vxn['Nc'], Ec=self.vxn['Ec'],
+                              Vt=self.Vt)
+        self.vxn['p0'] = cc.p(psi=self.vxn['psi_lcn'], phi_p=0,
+                              Nv=self.vxn['Nv'], Ev=self.vxn['Ev'],
+                              Vt=self.Vt)
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -298,9 +417,11 @@ if __name__ == '__main__':
                        remove_layers=(1, 1))
     ld.gen_nonuniform_mesh()
     ld.calc_all_params()
-    x, y, Eg = ld.get_value('Eg')
+    ld.make_dimensionless()
+    ld.solve_lcn()
+    x, y, psi = ld.get_value('psi_lcn')
 
     plt.close('all')
     plt.figure()
-    plt.scatter(y, x, c=Eg, marker='s', s=2)
+    plt.scatter(y, x, c=psi, marker='s')
     plt.show()
