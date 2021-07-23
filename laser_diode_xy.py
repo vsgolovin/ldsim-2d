@@ -172,6 +172,16 @@ class LaserDiode(object):
                 msh['tc'][j] = self.dsgn.inside_top_contact(yj)
                 msh['bc'][j] = self.dsgn.inside_bottom_contact(yj)
 
+        # mask for selecting contact nodes
+        msh['ixc'] = np.full(np.sum(msh['mx']), False)
+        k = 0
+        for j, mx in enumerate(msh['mx']):
+            if msh['bc'][j]:
+                msh['ixc'][k] = True
+            if msh['tc'][j]:
+                msh['ixc'][k+mx-1] = True
+            k += mx
+
         return msh
 
     def get_flattened_2d_mesh(self):
