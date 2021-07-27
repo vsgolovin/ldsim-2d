@@ -297,7 +297,8 @@ class LaserDiode(object):
         if not self.is_dimensionless:
             x /= units.x
             y /= units.x
-        self.wg_mode = self.wg_fun(x=x, y=y, grid=False)
+        if self.n_eff is not None:
+            self.wg_mode = self.wg_fun(x=x, y=y, grid=False)
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
@@ -318,7 +319,8 @@ class LaserDiode(object):
         self.alpha_i /= 1/units.x
 
         # arrays
-        for key in ['xn', 'xb', 'yn', 'yb']:
+        for key in ['xn', 'xb', 'hx', 'wx',
+                    'yn', 'yb', 'hy', 'wy']:
             self.mesh[key] /= units.x
         for d in [self.vxn, self.vxb, self.sol]:
             for key in d:
@@ -346,7 +348,8 @@ class LaserDiode(object):
         self.alpha_i *= 1/units.x
 
         # arrays
-        for key in ['xn', 'xb', 'yn', 'yb']:
+        for key in ['xn', 'xb', 'hx', 'wx',
+                    'yn', 'yb', 'hy', 'wy']:
             self.mesh[key] *= units.x
         for d in [self.vxn, self.vxb, self.sol]:
             for key in d:
