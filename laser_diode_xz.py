@@ -427,11 +427,9 @@ class LaserDiode(object):
         def f(psi):
             n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
             p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
-            return self.yin['C_dop']-n+p
-        def fdot(psi):
             ndot = cc.dn_dpsi(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
             pdot = cc.dp_dpsi(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
-            return -ndot+pdot
+            return (self.yin['C_dop']-n+p, -ndot+pdot)
 
         # initial guess with Boltzmann statistics
         ni = eq.intrinsic_concentration(self.yin['Nc'], self.yin['Nv'],
@@ -443,7 +441,7 @@ class LaserDiode(object):
         # Jacobian is a vector -> element-wise division
         la_fun = lambda A, b: b/A
 
-        sol = newton.NewtonSolver(f, fdot, Ef_i, la_fun)
+        sol = newton.NewtonSolver(f, Ef_i, la_fun)
         return sol
 
     def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
@@ -465,7 +463,7 @@ class LaserDiode(object):
         assert self.ndim == 1
         sol = self.gen_lcn_solver()
         sol.solve(maxiter, fluct, omega)
-        if sol.fluct[-1]>fluct:
+        if sol.fluct[-1] > fluct:
             warnings.warn('LaserDiode1D.solve_lcn(): fluctuation '+
                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
 
@@ -487,25 +485,20 @@ class LaserDiode(object):
         h = self.xin[1:]-self.xin[:-1]
         w = self.xbn[1:]-self.xbn[:-1]
 
-        def res(psi):
+        def f(psi):
             n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
             p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
             r = eq.poisson_res(psi, n, p, h, w, self.yin['eps'], self.eps_0,
                                self.q, self.yin['C_dop'])
-            return r
-
-        def jac(psi):
-            n = cc.n(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
             ndot = cc.dn_dpsi(psi, 0, self.yin['Nc'], self.yin['Ec'], self.Vt)
-            p = cc.p(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
             pdot = cc.dp_dpsi(psi, 0, self.yin['Nv'], self.yin['Ev'], self.Vt)
             j = eq.poisson_jac(psi, n, ndot, p, pdot, h, w, self.yin['eps'],
                                 self.eps_0, self.q, self.yin['C_dop'])
-            return j
+            return r, j
 
         la_fun = lambda A, b: solve_banded((1,1), A, b)
         psi_init = self.yin['psi_lcn']
-        sol = newton.NewtonSolver(res, jac, psi_init, la_fun,
+        sol = newton.NewtonSolver(f, psi_init, la_fun,
                                   inds=np.arange(1, len(psi_init)-1))
         return sol
 
@@ -528,7 +521,7 @@ class LaserDiode(object):
         assert self.ndim == 1
         sol = self.gen_equilibrium_solver()
         sol.solve(maxiter, fluct, omega)
-        if sol.fluct[-1]>fluct:
+        if sol.fluct[-1] > fluct:
             warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation '+
                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
         self.yin['psi_bi'] = sol.x.copy()
