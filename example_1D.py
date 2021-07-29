@@ -16,7 +16,7 @@ export_folder = 'results'
 # set up the problem
 ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
                 lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
-ld.gen_nonuniform_mesh(step_min=1e-9, step_max=20e-7, sigma=1e-5,
+ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, sigma=1e-5,
                        y_ext=[0.3, 0.3])
 ld.make_dimensionless()
 ld.solve_waveguide(remove_layers=(1, 1))  # ignore contact layers
@@ -108,7 +108,7 @@ plt.plot(x, ld.sol['n'], 'b-', label=r'$n$')
 plt.plot(x, ld.sol['p'], 'r-', label=r'$p$')
 plt.legend()
 plt.yscale('log')
-plt.ylabel('$n$, $p$ (cm$^-3$)')
+plt.ylabel('$n$, $p$ (cm$^{-3}$)')
 
 plt.figure('J-V curve')
 plt.plot(voltages, J_values*1e-3, 'b.-')
