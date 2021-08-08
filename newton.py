@@ -61,9 +61,12 @@ class NewtonSolver(object):
 
         # solve J*dx = -r system and update x
         dx = self.la_solver(self.jac, -self.rvec)
-        self.fluct.append(l2_norm(dx)/l2_norm(self.x))
+        fluct = l2_norm(dx) / l2_norm(self.x)
+        self.fluct.append(fluct)
         self.x[self.inds] += dx*omega
         self.i += 1
+
+        return fluct
 
     def solve(self, maxiter=500, fluct=1e-7, omega=1.0):
         """

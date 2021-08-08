@@ -6,6 +6,7 @@
 import warnings
 import numpy as np
 from scipy.interpolate import interp1d, RectBivariateSpline
+from scipy import sparse
 import design
 import constants as const
 import waveguide as wg
@@ -81,6 +82,7 @@ class LaserDiode(object):
         self.vg = const.c / ng
         self.n_eff = None
         self.gamma = None
+        self.psi_bi = np.zeros(0)
         self.alpha_i = alpha_i
         self.beta_sp = beta_sp
 
@@ -326,6 +328,7 @@ class LaserDiode(object):
             for key in d:
                 d[key] /= units.dct[key]
         self.wg_mode /= 1/units.x**2
+        self.psi_bi /= units.V
 
         self.is_dimensionless = True
 
@@ -335,7 +338,7 @@ class LaserDiode(object):
             return
 
         # constants
-        self.Vt *= units.v
+        self.Vt *= units.V
         self.q *= units.q
         self.eps_0 *= units.q / (units.x*units.V)
 
@@ -355,6 +358,7 @@ class LaserDiode(object):
             for key in d:
                 d[key] *= units.dct[key]
         self.wg_mode *= 1/units.x**2
+        self.psi_bi *= units.V
 
         self.is_dimensionless = False
 
@@ -369,12 +373,9 @@ class LaserDiode(object):
         def f(psi):
             n = cc.n(psi, 0, v['Nc'], v['Ec'], self.Vt)
             p = cc.p(psi, 0, v['Nv'], self.vxn['Ev'], self.Vt)
-            return v['C_dop'] - n + p
-
-        def fdot(psi):
             ndot = cc.dn_dpsi(psi, 0, v['Nc'], self.vxn['Ec'], self.Vt)
             pdot = cc.dp_dpsi(psi, 0, v['Nv'], self.vxn['Ev'], self.Vt)
-            return -ndot + pdot
+            return (v['C_dop'] - n + p, -ndot + pdot)
 
         # initial guess using Boltzmann statistics
         ni = eq.intrinsic_concentration(v['Nc'], v['Nv'],
@@ -383,7 +384,7 @@ class LaserDiode(object):
                                 v['Ec'], v['Ev'], self.Vt)
         Ef_i = eq.Ef_lcn_boltzmann(v['C_dop'], ni, Ei, self.Vt)
 
-        return newton.NewtonSolver(f, fdot, Ef_i, lambda A, b: b/A)
+        return newton.NewtonSolver(f, Ef_i, lambda A, b: b/A)
 
     def solve_lcn(self, maxiter=100, fluct=1e-12, omega=1.0):
         """
@@ -415,6 +416,181 @@ class LaserDiode(object):
                               Nv=self.vxn['Nv'], Ev=self.vxn['Ev'],
                               Vt=self.Vt)
 
+    def make_equilibrium_solver(self):
+        """
+        Make a `NewtonSolver` for electrostatic potential distribution
+        in the x-y plane at equilibrium (zero external bias).
+        """
+        assert 'psi_lcn' in self.vxn
+        _, _, psi_0 = self.get_value('psi_lcn')
+        pts = len(psi_0) - ld.mesh['ixc'].sum()
+        v = self.vxn
+        msh = self.mesh
+        hy = msh['hy']
+        my = len(msh['yn'])
+
+        def f(psi):
+            rvec = np.zeros(pts)
+            J = sparse.lil_matrix((pts, pts))
+
+            # iterate over vertical slices
+            i1 = 0  # indexing psi (with contact nodes)
+            i2 = 0  # indexing rvec and J
+            for j in range(my):
+
+                # number of nodes in current, previous and next slices
+                mx = msh['mx'][j]
+                mxb, mxf = 0, 0  # back / forward
+                if j > 0:
+                    mxb = msh['mx'][j-1]
+                if j < (my - 1):
+                    mxf = msh['mx'][j+1]
+
+                # some aliases
+                psi_j = psi[i1:i1+mx]
+                eps = v['eps'][:mx]
+                hx = msh['hx'][:mx-1]
+                wx = msh['wx'][:mx]
+                wy = msh['wy'][j]
+
+                # carrier densities and their derivatives w.r.t. potential
+                n = cc.n(psi_j, 0, v['Nc'][:mx], v['Ec'][:mx], self.Vt)
+                ndot = cc.dn_dpsi(psi_j, 0, v['Nc'][:mx], v['Ec'][:mx],
+                                  self.Vt)
+                p = cc.p(psi_j, 0, v['Nv'][:mx], v['Ev'][:mx], self.Vt)
+                pdot = cc.dp_dpsi(psi_j, 0, v['Nv'][:mx], v['Ev'][:mx],
+                                  self.Vt)
+
+                # residuals (without dpsi/dy terms)
+                rj = self.q/self.eps_0 * (v['C_dop'][:mx] - n + p) * wx*wy
+                rj[:-1] += eps[:-1] * (psi_j[1:] - psi_j[:-1]) / hx * wy
+                rj[1:] += -eps[1:] * (psi_j[1:] - psi_j[:-1]) / hx * wy
+
+                # Jacobian, 3 diagonals: (1, 0, -1) -- top, main, bottom
+                # y derivatives are considered later
+                md = self.q / self.eps_0 * (pdot - ndot) * wx * wy
+                md[:-1] += -eps[:-1] / hx * wy
+                md[1:] += -eps[1:] / hx * wy
+                td = eps[:-1] / hx * wy
+                bd = eps[1:] / hx * wy
+
+                # check if top or bottom nodes are contacts
+                mx2 = mx
+                if msh['tc'][j]:
+                    mx2 -= 1
+                if msh['bc'][j]:
+                    mx2 -= 1
+                    k = 1
+                else:
+                    k = 0
+
+                # forward derivative w.r.t. y
+                if mxf > 0:
+                    m = min(mxf, mx)
+                    psi_f = psi[i1+mx : i1+mx+m]
+                    rj[:m] += eps[:m] * (psi_f - psi_j[:m]) / hy[j] * wx[:m]
+                    td2 = eps[:m] / hy[j] * wx[:m]
+                    md[:m] += -eps[:m] / hy[j] * wx[:m]
+
+                    if msh['bc'][j]:
+                        k1, k2 = 0, 1
+                        m -= 1
+                    elif msh['bc'][j+1]:
+                        k1, k2 = 1, 1
+                        m -= 1
+                    else:
+                        k1, k2 = 0, 0
+                    if ((mx <= mxf and msh['tc'][j])
+                       or (mx >= mxf and msh['tc'][j+1])):
+                        m -= 1
+                    inds = np.arange(i2 + k1, i2 + k1 + m)
+                    J[inds, inds+mx2] = td2[k2:k2+m]
+
+                # same for back derivative
+                if mxb > 0:
+                    m = min(mxb, mx)
+                    psi_b = psi[i1-mxb : i1-mxb+m]
+                    rj[:m] += -eps[:m] * (psi_j[:m] - psi_b) / hy[j-1] * wx[:m]
+                    bd2 = -eps[:m] / hy[j-1] * wx[:m]
+                    md[:m] += eps[:m] / hy[j-1] * wx[:m]
+
+                    if msh['bc'][j]:
+                        k1, k2 = 0, 1
+                        m -= 1
+                    elif msh['bc'][j-1]:
+                        k1, k2 = 1, 1
+                        m -= 1
+                    else:
+                        k1, k2 = 0, 0
+                    if ((mx <= mxb and msh['tc'][j])
+                       or (mx >= mxb and msh['tc'][j-1])):
+                        m -= 1
+                    inds = np.arange(i2 + k1, i2 + k1 + m)
+                    mxb2 = mxb - int(msh['tc'][j-1]) - int(msh['bc'][j-1])
+                    J[inds, inds-mxb2] = bd2[k2:k2+m]
+
+                # fill rvec and J (3 main diagonals) with calculated values
+                rvec[i2:i2+mx2] = rj[k:k+mx2]
+                inds = np.arange(i2, i2 + mx2)
+                J[inds, inds] = md[k:k+mx2]
+                J[inds[:-1], inds[1:]] = td[k:k+mx2-1]
+                J[inds[1:], inds[:-1]] = bd[k:k+mx2-1]
+                i1 += mx
+                i2 += mx2
+
+            return rvec, J.tocsc()
+
+        return newton.NewtonSolver(f, psi_0,
+                                   sparse.linalg.spsolve,
+                                   ~msh['ixc'])
+
+    def solve_equilibrium(self, maxiter=100, fluct=1e-15, omega=1.0):
+        """
+        Calculate electrostatic potential distribution in the x-y plane at
+        equilibrium (zero external bias). Uses Newtons's method implemented
+        in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newtons's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reaching `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        sol = self.make_equilibrium_solver()
+        sol.solve(maxiter, fluct, omega)
+        if sol.fluct[-1] > fluct:
+            warnings.warn('LaserDiode.solve_equilibrium(): fluctuation ' +
+                          ('%e exceeds %e.' % (sol.fluct[-1], fluct)))
+        self.psi_bi = sol.x.copy()
+        self.sol['psi'] = sol.x.copy()
+        self.sol['phi_n'] = np.zeros_like(sol.x)
+        self.sol['phi_p'] = np.zeros_like(sol.x)
+        self._update_densities()
+        return sol
+
+    def _update_densities(self):
+        """
+        Update electron and hole densities using currently stored potentials.
+        """
+        Nc = self.get_value('Nc')[2]
+        Ec = self.get_value('Ec')[2]
+        Nv = self.get_value('Nv')[2]
+        Ev = self.get_value('Ev')[2]
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        phi_p = self.sol['phi_p']
+        self.sol['n'] = cc.n(psi, phi_n, Nc, Ec, self.Vt)
+        self.sol['dn_dpsi'] = cc.dn_dpsi(psi, phi_n, Nc, Ec, self.Vt)
+        self.sol['dn_dphin'] = cc.dn_dphin(psi, phi_n, Nc, Ec, self.Vt)
+        self.sol['p'] = cc.p(psi, phi_p, Nv, Ev, self.Vt)
+        self.sol['dp_dpsi'] = cc.dp_dpsi(psi, phi_p, Nv, Ev, self.Vt)
+        self.sol['dp_dphip'] = cc.dp_dphip(psi, phi_p, Nv, Ev, self.Vt)
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -432,9 +608,15 @@ if __name__ == '__main__':
     ld.calc_all_params()
     ld.make_dimensionless()
     ld.solve_lcn()
-    x, y, psi = ld.get_value('psi_lcn')
+    ld.solve_equilibrium()
+    ld.original_units()
+    x, y = ld.get_flattened_2d_mesh()
 
     plt.close('all')
-    plt.figure()
-    plt.scatter(y, x, c=psi, marker='s')
+    plt.figure('psi')
+    plt.scatter(y, x, c=ld.psi_bi, marker='s')
+    plt.figure('n')
+    plt.scatter(y, x, c=ld.sol['n'], marker='s')
+    plt.figure('p')
+    plt.scatter(y, x, c=ld.sol['p'], marker='s')
     plt.show()
