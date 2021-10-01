@@ -125,11 +125,12 @@ plt.ylabel('$P$ (W)')
 # export arrays with simulation results
 if export:
     with open(export_folder + '/' + 'LIV.csv', 'w') as f:
-        f.write(','.join(('V', 'J', 'I', 'P1', 'P2', 'I_srh', 'I_rad', 'I_aug')))
+        f.write(','.join(('V', 'J', 'I', 'P1', 'P2',
+                          'I_srh', 'I_rad', 'I_aug', 'FCA')))
         for i in range(len(voltages)):
             f.write('\n')
             vals = map(str, (voltages[i], J_values[i], I_values[i],
                              P_values[0, i], P_values[1, i],
                              Isrh_values[i], Irad_values[i],
-                             Iaug_values[i]))
+                             Iaug_values[i], fca_values[i]))
             f.write(','.join(vals))
