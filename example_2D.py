@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sample_design import epi
 from laser_diode_xz import LaserDiode
+import units
 
 # export settings
 export = True
@@ -89,6 +90,22 @@ while i < mv:
     Jrad_values[:, i] = ld.get_Jsp('radiative')
     Jaug_values[:, i] = ld.get_Jsp('Auger')
     fca_values[:, i] = ld.get_FCA()
+
+    # export longitudinal dependencies of current density and FCA
+    if ld.ndim == 2 and export:
+        fname = '2D_J+FCA_%.2fV.csv' % v
+        with open(export_folder + '/' + fname, 'w') as f:
+            f.write(','.join(('z', 'J', 'J_srh', 'J_rad', 'J_aug',
+                              'FCA', 'S')))
+            S = (ld.Sb + ld.Sf) * units.n
+            S = (S[:-1] + S[1:]) / 2
+            for k in range(len(ld.zin)):
+                f.write('\n')
+                zk = ld.zin[k] * units.x
+                vals = map(str, (zk, J_values[k, i], Jsrh_values[k, i],
+                                 Jrad_values[k, i], Jaug_values[k, i],
+                                 fca_values[k, i], S[k]))
+                f.write(','.join(vals))
 
     i += 1  # increase voltage
 

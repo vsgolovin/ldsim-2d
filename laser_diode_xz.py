@@ -10,6 +10,7 @@ import warnings
 import os
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.interpolate import InterpolatedUnivariateSpline
 from scipy.linalg import solve_banded
 from scipy import sparse
 import design
@@ -1621,20 +1622,25 @@ class LaserDiode(object):
         x = self.xin.copy()
         Ev = self.yin['Ev'] - self.sol['psi']
         Ec = self.yin['Ec'] - self.sol['psi']
-        Fn = -self.sol['phi_n']
-        Fp = -self.sol['phi_p']
+        fn = -self.sol['phi_n']
+        fp = -self.sol['phi_p']
         n = self.sol['n'].copy()
         p = self.sol['p'].copy()
+        psi = self.sol['psi'].copy()
+        F_spl = InterpolatedUnivariateSpline(self.xin, psi).derivative()
+        F = -F_spl(self.xin)
 
         # convert dimensionless values
         if self.is_dimensionless:
             x *= units.x
             Ev *= units.E
             Ec *= units.E
-            Fn *= units.E
-            Fp *= units.E
+            fn *= units.E
+            fp *= units.E
             n *= units.n
             p *= units.n
+            psi *= units.V
+            F *= units.V / units.x
 
         # convert x to micrometers
         if x_to_um:
@@ -1643,13 +1649,13 @@ class LaserDiode(object):
         # write to file
         with open(file, 'w') as f:
             # header
-            f.write(delimiter.join(('x', 'Ev', 'Ec',
-                                    'Fn', 'Fp', 'n', 'p')))
+            f.write(delimiter.join(('x', 'Ev', 'Ec', 'fn', 'fp', 'n', 'p',
+                                    'psi', 'F')))
             # values
             for i in range(self.nx):
                 f.write('\n')
-                vals = map('{:e}'.format, (x[i], Ev[i], Ec[i],
-                                           Fn[i], Fp[i], n[i], p[i]))
+                vals = map('{:e}'.format, (x[i], Ev[i], Ec[i], fn[i],
+                                          fp[i], n[i], p[i], psi[i], F[i]))
                 line = delimiter.join(vals)
                 f.write(line)
 
