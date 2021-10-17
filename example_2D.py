@@ -36,6 +36,8 @@ Jrad_values = np.zeros((mz, mv))  # radiative
 Jaug_values = np.zeros((mz, mv))  # Auger
 fca_values = np.zeros((mz, mv))   # free-carrier-absorption
 P_values = np.zeros((2, mv))      # power from both facets
+n_values = np.zeros((mz, mv))
+p_values = np.zeros((mz, mv))
 
 # solve the transport system for every voltage
 # (twice at threshold voltage: 1D, then 2D)
@@ -90,13 +92,21 @@ while i < mv:
     Jrad_values[:, i] = ld.get_Jsp('radiative')
     Jaug_values[:, i] = ld.get_Jsp('Auger')
     fca_values[:, i] = ld.get_FCA()
+    if ld.ndim == 1:
+        n_values[:, i] = ld.sol['n'][ld.ar_ix].mean()
+        p_values[:, i] = ld.sol['p'][ld.ar_ix].mean()
+    else:
+        n_values[:, i] = np.array([d['n'][ld.ar_ix].mean()
+                                   for d in ld.sol2d]) * units.n
+        p_values[:, i] = np.array([d['p'][ld.ar_ix].mean()
+                                   for d in ld.sol2d]) * units.n
 
-    # export longitudinal dependencies of current density and FCA
+    # export longitudinal dependencies
     if ld.ndim == 2 and export:
-        fname = '2D_J+FCA_%.2fV.csv' % v
+        fname = '2D_f(z)_%.2fV.csv' % v
         with open(export_folder + '/' + fname, 'w') as f:
             f.write(','.join(('z', 'J', 'J_srh', 'J_rad', 'J_aug',
-                              'FCA', 'S')))
+                              'FCA', 'S', 'n', 'p')))
             S = (ld.Sb + ld.Sf) * units.n
             S = (S[:-1] + S[1:]) / 2
             for k in range(len(ld.zin)):
@@ -104,7 +114,8 @@ while i < mv:
                 zk = ld.zin[k] * units.x
                 vals = map(str, (zk, J_values[k, i], Jsrh_values[k, i],
                                  Jrad_values[k, i], Jaug_values[k, i],
-                                 fca_values[k, i], S[k]))
+                                 fca_values[k, i], S[k],
+                                 n_values[k, i], p_values[k, i]))
                 f.write(','.join(vals))
 
     i += 1  # increase voltage
@@ -117,7 +128,6 @@ I_values = J_avg * ld.w * ld.L
 I_srh = Jsrh_values.mean(axis=0) * ld.w * ld.L
 I_rad = Jrad_values.mean(axis=0) * ld.w * ld.L
 I_aug = Jaug_values.mean(axis=0) * ld.w * ld.L
-n_z = np.array([d['n'][ld.ar_ix].mean() for d in ld.sol2d])
 
 # change default Matplotlib settings
 plt.rc('lines', linewidth=0.7)
@@ -149,7 +159,7 @@ plt.plot(ld.zbn*1e4, ld.Sf + ld.Sb, 'rx-')
 plt.ylabel('Photon density $S$ (cm$^{-2}$)', color='r')  # 1 / (y*z)
 plt.xlabel(r'$z$ ($\mu$m)')
 plt.twinx()
-plt.plot(ld.zin*1e4, n_z, 'b.-')
+plt.plot(ld.zin*1e4, n_values[:, -1], 'b.-')
 plt.ylabel('$n_{a}$ (cm$^{-3}$)', color='b')
 
 # export arrays with simulation results
