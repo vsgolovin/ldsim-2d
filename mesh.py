@@ -52,44 +52,23 @@ class Mesh2D:
         self.yb = y
         self.yn = (self.yb[1:] + self.yb[:-1]) / 2
 
-        mx = np.zeros(self.yn.shape, dtype=int)
-        tc = np.zeros(self.yn.shape, dtype=bool)
-        bc = np.zeros(self.yn.shape, dtype=bool)
-        x = []
-        y = []
-        ind_c = []
-        k = 0
+        # create masks
+        msk = dict()
+        for key in ('ins', 'tc', 'bc', 'lb', 'rb', 'bb', 'tb'):
+            msk[key] = np.zeros((len(self.xn), len(self.yn)), dtype=bool)
         for j, yj in enumerate(self.yn):
-            tc[j] = dsgn.inside_top_contact(yj)
-            bc[j] = dsgn.inside_bottom_contact(yj)
-            if j > 0 and tc[j - 1]:
-                ind_c.pop()
+            tc = dsgn.inside_top_contact(yj)
+            bc = dsgn.inside_bottom_contact(yj)
+            if bc and len(self.xn) > 0:
+                msk['bc'][0, j] = True
             for i, xi in enumerate(self.xn):
                 if dsgn.inside(xi, yj):
-                    x.append(xi)
-                    y.append(yj)
-                    mx[j] += 1
-                    if i > 0 or not bc[j]:
-                        ind_c.append(k)
-                    k += 1
-        mxc = [mx[j] - int(tc[j]) - int(bc[j]) for j in range(len(self.yn))]
-        assert sum(mxc) == len(ind_c)
-        self.x = np.array(x)
-        self.y = np.array(y)
-        self.ind_c = np.array(ind_c)
-        
-        self.ind_ym = self.ind_c.copy()
-        j = 1
-        i = 0
-        for k, ind in enumerate(self.ind_c):
-            if k < mxc[0]:
-                continue
-            if ind - mxc[j] in self.ind_c:
-                self.ind_ym[k] = ind - mxc[j - 1]
-            i += 1
-            if i == mxc[j]:
-                i = 0
-                j += 1
+                    msk['ins'][i][j] = True
+                else:
+                    break
+            if tc:
+                msk['tc'][i][j] = True
+        self.msk = msk
 
 
 if __name__ == '__main__':
@@ -106,12 +85,23 @@ if __name__ == '__main__':
     dsgn.set_bottom_contact(18e-4)
     y = np.linspace(0, 20e-4, 100)
 
-    msh = Mesh2D(x, y, dsgn)
+    msh = Mesh2D(xm, y, dsgn)
+    xn, yn = [], []
+    xtc, ytc = [], []
+    xbc, ybc = [], []
+    for j, yj in enumerate(msh.yn):
+        for i, xi in enumerate(msh.xn):
+            if msh.msk['ins'][i][j]:
+                xn.append(xi)
+                yn.append(yj)
+            if msh.msk['tc'][i][j]:
+                xtc.append(xi)
+                ytc.append(yj)
+            if msh.msk['bc'][i][j]:
+                xbc.append(xi)
+                ybc.append(yj)
     plt.figure()
-    plt.plot(msh.y, msh.x, 'bo')
-    plt.plot(msh.y[msh.ind_c], msh.x[msh.ind_c], 'rx')
-
-    plt.figure()
-    plt.plot(msh.y[msh.ind_c], msh.x[msh.ind_c], 'bo')
-    plt.plot(msh.y[msh.ind_ym], msh.x[msh.ind_ym], 'rx')
+    plt.plot(yn, xn, color='gray', ls='none', marker='o', ms=4)
+    plt.plot(ytc, xtc, 'rx', ms=4)
+    plt.plot(ybc, xbc, 'bP', ms=4)
     plt.show()
