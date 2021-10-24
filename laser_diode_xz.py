@@ -795,6 +795,7 @@ class LaserDiode(object):
         """
         Calculate Jacobian and residual for the transport problem.
         Uses solution currently stored in `self.sol`.
+        Saves calculated values of current densities in `self.sol`.
 
         Parameters
         ----------
@@ -841,7 +842,6 @@ class LaserDiode(object):
                 self._jp_SG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
                             derivatives=True)
 
-
         elif discr == 'mSG':  # modified SG discretization
             jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = \
                 self._jn_mSG(B_plus, B_minus, Bdot_plus, Bdot_minus, h,
@@ -853,6 +853,10 @@ class LaserDiode(object):
         else:
             raise Exception('Error: unknown current density '
                             + 'discretization scheme %s.' % discr)
+
+        # store calculated current densities
+        self.sol['jn'] = jn
+        self.sol['jp'] = jp
 
         # spontaneous recombination rates (m)
         n0 = self.yin['n0'][1:-1]
@@ -1406,35 +1410,14 @@ class LaserDiode(object):
     # extract useful data from simulation results
     def get_J(self, discr='mSG'):
         "Get current density through device (A/cm2)."
-        # function for calculating current density
-        def calc(self, discr):
-            psi = self.sol['psi']
-            B_plus = flux.bernoulli(+(psi[1:] - psi[:-1]) / self.Vt)
-            B_minus = flux.bernoulli(-(psi[1:] - psi[:-1]) / self.Vt)
-            h = self.xin[1:] - self.xin[:-1]
-            if discr == 'SG':
-                jn = self._jn_SG(B_plus, B_minus, Bdot_plus=None,
-                                 Bdot_minus=None, h=h, derivatives=False)
-                jp = self._jp_SG(B_plus, B_minus, Bdot_plus=None,
-                                 Bdot_minus=None, h=h, derivatives=False)
-            elif discr == 'mSG':
-                jn = self._jn_mSG(B_plus, B_minus, Bdot_plus=None,
-                                  Bdot_minus=None, h=h, derivatives=False)
-                jp = self._jp_mSG(B_plus, B_minus, Bdot_plus=None,
-                                  Bdot_minus=None, h=h, derivatives=False)
-            else:
-                raise Exception('Error: unknown current density '
-                                + 'discretization scheme %s.' % discr)
-            return (jn + jp).mean()
-
         # 1D -- return float, 2D -- return numpy.ndarray
         if self.ndim == 1:
-            J = calc(self, discr)
+            J = (self.sol['jn'] + self.sol['jp']).mean()
         else:  # calculate J for every slice
             J = np.zeros(self.mz)
             for k in range(self.mz):
-                self.sol = self.sol2d[k]
-                J[k] = calc(self, discr)
+                sol = self.sol2d[k]
+                J[k] = (sol['jn'] + sol['jp']).mean()
             self.sol = dict()
 
         if self.is_dimensionless:
@@ -1653,6 +1636,10 @@ class LaserDiode(object):
         psi = self.sol['psi'].copy()
         F_spl = InterpolatedUnivariateSpline(self.xin, psi).derivative()
         F = -F_spl(self.xin)
+        jn = np.zeros_like(self.xin)
+        jn[1:-1] = (self.sol['jn'][1:] + self.sol['jn'][:-1]) / 2
+        jp = np.zeros_like(self.xin)
+        jp[1:-1] = (self.sol['jp'][1:] + self.sol['jp'][:-1]) / 2
 
         # convert dimensionless values
         if self.is_dimensionless:
@@ -1665,6 +1652,8 @@ class LaserDiode(object):
             p *= units.n
             psi *= units.V
             F *= units.V / units.x
+            jn *= units.j
+            jp *= units.j
 
         # convert x to micrometers
         if x_to_um:
@@ -1674,12 +1663,13 @@ class LaserDiode(object):
         with open(file, 'w') as f:
             # header
             f.write(delimiter.join(('x', 'Ev', 'Ec', 'fn', 'fp', 'n', 'p',
-                                    'psi', 'F')))
+                                    'psi', 'F', 'jn', 'jp')))
             # values
             for i in range(self.nx):
                 f.write('\n')
                 vals = map('{:e}'.format, (x[i], Ev[i], Ec[i], fn[i],
-                                          fp[i], n[i], p[i], psi[i], F[i]))
+                                          fp[i], n[i], p[i], psi[i], F[i],
+                                          jn[i], jp[i]))
                 line = delimiter.join(vals)
                 f.write(line)
 
