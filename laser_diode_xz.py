@@ -1461,6 +1461,30 @@ class LaserDiode(object):
             P *= units.P
         return P
 
+    def get_n_active(self):
+        "Get average electron and hole density in the active region."
+        def avg_density(n, dx, D):
+            # integrate using trapezoid formula
+            return np.sum((n[:-1] + n[1:]) / 2 * dx) / D
+
+        ix = self.ar_ix
+        x = self.xin[ix]
+        dx = x[1:] - x[:-1]
+        D = x[-1] - x[0]  # active region thickness
+        if self.ndim == 1:
+            n_avg = avg_density(self.sol['n'][ix], dx, D)
+            p_avg = avg_density(self.sol['p'][ix], dx, D)
+        else:
+            n_avg = np.zeros(self.mz)
+            p_avg = np.zeros(self.mz)
+            for k in range(self.mz):
+                n_avg[k] = avg_density(self.sol2d[k]['n'][ix], dx, D)
+                p_avg[k] = avg_density(self.sol2d[k]['p'][ix], dx, D)
+        if self.is_dimensionless:
+            n_avg *= units.n
+            p_avg *= units.n
+        return n_avg, p_avg
+
     def get_FCA(self):
         "Get free-carrier absorption (cm-1)."
         if self.ndim == 1:
@@ -1768,6 +1792,7 @@ if __name__ == '__main__':
 
     I_1D = ld.get_I()
     P = ld.get_P()
+    n_1D, p_1D = ld.get_n_active()
     print('I_1D =', I_1D)
     print(f'P_1D = {P[0]:.3f} + {P[1]:.3f} W')
 
@@ -1786,3 +1811,12 @@ if __name__ == '__main__':
     P = ld.get_P()
     print('I_2D = ', I_2D.sum())
     print(f'P_2D = {P[0]:.3f} + {P[1]:.3f} W')
+
+    n_2D, p_2D = ld.get_n_active()
+    plt.figure('Carrier density distribution')
+    plt.plot(ld.zin*1e4, n_2D, 'b.-')
+    plt.plot([0, ld.L*1e4], [n_1D]*2, 'b:')
+    plt.plot(ld.zin*1e4, p_2D, 'r.-')
+    plt.plot([0, ld.L*1e4], [p_1D]*2, 'r:')
+    plt.xlabel(r'$z$, $\mu$m')
+    plt.ylabel(r'$n_{a}$, $p_{a}$ (cm$^{-3}$)')

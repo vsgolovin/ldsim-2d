@@ -92,14 +92,7 @@ while i < mv:
     Jrad_values[:, i] = ld.get_Jsp('radiative')
     Jaug_values[:, i] = ld.get_Jsp('Auger')
     fca_values[:, i] = ld.get_FCA()
-    if ld.ndim == 1:
-        n_values[:, i] = ld.sol['n'][ld.ar_ix].mean()
-        p_values[:, i] = ld.sol['p'][ld.ar_ix].mean()
-    else:
-        n_values[:, i] = np.array([d['n'][ld.ar_ix].mean()
-                                   for d in ld.sol2d]) * units.n
-        p_values[:, i] = np.array([d['p'][ld.ar_ix].mean()
-                                   for d in ld.sol2d]) * units.n
+    n_values[:, i], p_values[:, i] = ld.get_n_active()
 
     # export longitudinal dependencies
     if ld.ndim == 2 and export:
