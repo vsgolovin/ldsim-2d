@@ -100,7 +100,7 @@ while i < mv:
         with open(export_folder + '/' + fname, 'w') as f:
             f.write(','.join(('z', 'J', 'J_srh', 'J_rad', 'J_aug',
                               'FCA', 'S', 'n', 'p')))
-            S = (ld.Sb + ld.Sf) * units.n
+            S = (ld.Sb + ld.Sf) * units.n * units.x
             S = (S[:-1] + S[1:]) / 2
             for k in range(len(ld.zin)):
                 f.write('\n')
