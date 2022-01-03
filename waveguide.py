@@ -7,6 +7,7 @@ import numpy as np
 from scipy.sparse import diags
 from scipy.sparse.linalg import eigs
 
+
 def solve_wg(x, n, lam, n_modes):
     """
     Solve eigenvalue problem for a 1D waveguide.
@@ -16,7 +17,7 @@ def solve_wg(x, n, lam, n_modes):
     x : numpy.ndarray
         x coordinate.
     n : numpy.ndarray
-        Refractive index values. `n.shape==x.shape`
+        Refractive index values.
     lam : number
         Wavelength, same units as `x`.
     n_modes : int
@@ -30,29 +31,66 @@ def solve_wg(x, n, lam, n_modes):
         Calculated mode profiles.
 
     """
-    # creating matrix A for the eigenvalue problem
+    # create matrix A for the eigenvalue problem
     k0 = 2*np.pi / lam
-    delta_x = x[1]-x[0]  # uniform mesh
-    delta_chi2 = (delta_x*k0)**2
-    main_diag = n**2 - 2/delta_chi2
-    off_diag = np.full(x[:-1].shape, 1/delta_chi2)
+    delta_x = x[1] - x[0]  # uniform mesh
+    delta_chi2 = (delta_x * k0)**2
+    main_diag = n**2 - 2 / delta_chi2
+    off_diag = np.full(x[:-1].shape, 1 / delta_chi2)
     A = diags([off_diag, main_diag, off_diag], [-1, 0, 1])
 
-    # solving the eigenproblem
-    n_max = n.max()
-    w, v = eigs(A, k=n_modes, which='SR', sigma=n_max**2)
+    # solve the eigenproblem
+    w, v = eigs(A, k=n_modes, which='SR', sigma=n.max()**2)
 
-    # converting eigenvalues to effective refractive indices
+    # convert eigenvalues to effective refractive indices
     n_eff = np.sqrt(np.real(w))
     # and eigenvectors to mode profiles
     modes = np.real(v)**2
 
-    # normalizing modes
+    # normalize modes
     for i in range(n_modes):
-        integral = np.sum(modes[:, i])*delta_x
+        integral = np.sum(modes[:, i]) * delta_x
         modes[:, i] /= integral
 
     return n_eff, modes
+
+
+def solve_wg_2d(x, y, n, lam, n_modes, mx, my):
+    """
+    Solve eigenvalue problem for a 2D waveguide.
+    """
+    # create matrix A for the eigenvalue problem
+    k0 = 2*np.pi / lam
+    dx = x[1] - x[0]
+    assert dx > 0
+    dy = y[mx] - y[0]
+    assert dy > 0
+    hx2 = (dx * k0)**2
+    hy2 = (dy * k0)**2
+    diagonals = np.zeros((5, len(x)))
+    diagonals[0, :] = 1 / hy2
+    diagonals[1, :] = 1 / hx2
+    diagonals[2, :] = n**2 - 2 * (1/hx2 + 1/hy2)
+    diagonals[3, :] = 1 / hx2
+    diagonals[4, :] = 1 / hy2
+    A = diags(diagonals, offsets=[mx, 1, 0, -1, -mx], shape=(mx*my, mx*my))
+
+    # solve the eigenvalue problem
+    w, v = eigs(A, k=n_modes, which='SR', sigma=n.max()**2)
+
+    # convert eigenvalues to effective refractive indices
+    n_eff = np.sqrt(np.real(w))
+    # and eigenvectors to mode profiles
+    modes = np.real(v)**2
+
+    # normalize modes
+    w = dx * dy
+    for i in range(n_modes):
+        integral = np.sum(modes[:, i]) * w
+        modes[:, i] /= integral
+
+    return n_eff, modes
+
 
 # example
 if __name__=='__main__':

@@ -50,10 +50,6 @@ class Layer(object):
     def __str__(self):
         return self.name
 
-    def __eq__(self, other_name):
-        assert isinstance(other_name, str)
-        return self.name == other_name
-
     def calculate(self, param, x):
         "Calculate value of parameter `param` at location `x`."
         p = self.d[param]
@@ -142,6 +138,15 @@ class EpiDesign(list):
             inds[i], dx[i] = self._ind_dx(xi)
         return inds, dx
 
+    def _get_ixa(self, x):
+        "Get mask for selecting `x` elements belonging to active layers."
+        inds, _ = self._inds_dx(x)
+        ixa = np.zeros_like(x, dtype=bool)
+        for i, layer in enumerate(self):
+            if layer.active:
+                ixa |= (inds == i)
+        return ixa
+
     def calculate(self, param, x, inds=None, dx=None):
         "Calculate values of `param` at locations `x`."
         y = np.zeros_like(x)
@@ -156,6 +161,78 @@ class EpiDesign(list):
                 if ix.any():
                     y[ix] = layer.calculate(param, dx[ix])
         return y
+
+
+class Design2D(object):
+    """
+    Vertical-lateral (x-y) laser diode design. Is always symmetrical
+    w.r.t. y axis, layer parameters are also independent of y.
+    """
+    def __init__(self, epi, width):
+        """
+        Parameters
+        ----------
+        epi : EpiDesign
+            Epitaxial design.
+        width : float
+            Device total width (cm).
+        """
+        self.epi = epi
+        self.ymax = width
+        self.xmax = epi.get_thickness()
+        # trench parameters
+        self.dx = 0.0  # trench depth
+        self.y1 = 0.0
+        self.y2 = self.ymax / 3
+        # contact location
+        self.bc_width = self.ymax  # bottom contact width
+        self.tc_width = self.ymax  # top contact width
+
+    def get_thickness(self):
+        return self.epi.get_thickness()
+
+    def get_width(self):
+        return self.ymax
+
+    def inside(self, x, y):
+        assert y <= self.ymax
+        if y > self.ymax / 2:
+            y = self.ymax - y
+        if y < self.y1:
+            return x <= (self.xmax - self.dx)
+        elif y < self.y2:
+            k = self.dx / (self.y2 - self.y1)
+            return x <= ((self.xmax - self.dx) + (y - self.y1) * k)
+        else:
+            return x <= self.xmax
+
+    def add_trenches(self, y1, y2, dx):
+        """
+        Add two trenches with depth `dx` to both sides of the device.
+        """
+        assert y1 < self.ymax / 2 and y2 < self.ymax / 2
+        self.y1 = y1
+        self.y2 = y2
+        assert dx < self.xmax
+        self.dx = dx
+
+    def inside_bottom_contact(self, y):
+        assert y <= self.ymax
+        return abs(y - self.ymax / 2) <= self.bc_width / 2
+
+    def inside_top_contact(self, y):
+        assert y <= self.ymax
+        return abs(y - self.ymax / 2) <= self.tc_width / 2
+
+    def set_bottom_contact(self, width):
+        "Set the bottom ohmic contact width."
+        assert width <= self.ymax
+        self.bc_width = width
+
+    def set_top_contact(self, width):
+        "Set the top ohmic contact width."
+        assert width <= self.ymax
+        self.tc_width = width
 
 
 if __name__ == '__main__':
@@ -191,19 +268,37 @@ if __name__ == '__main__':
     pcl.update({'Na': 1e18})
     grad_pwg_pcl = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
-    pin = EpiDesign((ncl, grad_ncl_nwg, nwg, act, pwg, grad_pwg_pcl, pcl))
-    x = np.linspace(0, pin.get_thickness(), 5000)
-    inds, dx = pin._inds_dx(x)
-    Ec = pin.calculate('Ec', x, inds, dx)
-    Ev = pin.calculate('Ev', x)
-    n_refr = pin.calculate('n_refr', x, inds, dx)
-    for param in params:
-        pin.calculate(param, x, inds, dx)
+    pin = EpiDesign((ncl, nwg, act, pwg, pcl))
+    cs = Design2D(pin, 130e-4)
+    cs.add_trenches(y1=10e-4, y2=20e-4, dx=1.7e-4)
+    cs.set_bottom_contact(120e-4)
+    cs.set_top_contact(60e-4)
+
+    x = np.linspace(0, pin.get_thickness(), 1000)
+    y = np.linspace(0, cs.ymax, 121)
+
+    Z = np.zeros((len(x), len(y)), dtype='bool')
+    for i, xi in enumerate(x):
+        for j, yj in enumerate(y):
+            Z[i, j] = cs.inside(xi, yj)
+
+    Eg = pin.calculate('Eg', x)
+    Eg_2D = np.repeat(Eg, len(y)).reshape(len(x), len(y))
+    Eg_2D[Z == False] = 0.0
+    for j, yj in enumerate(y):
+        if cs.inside_bottom_contact(yj):
+            Eg_2D[0, j] = 3.0
+        if cs.inside_top_contact(yj):
+            Eg_2D[-1, j] = 3.0
 
     import matplotlib.pyplot as plt
+    plt.close('all')
     plt.figure()
-    plt.plot(x, Ec, 'b-')
-    plt.plot(x, Ev, 'r-')
-    plt.twinx()
-    plt.plot(x, n_refr, 'g:')
+    plt.contourf(y, x, Eg_2D, cmap=plt.cm.Blues)
+    x1, x2 = plt.xlim()
+    xspan = x2 - x1
+    plt.xlim(x1 - 1e-2*xspan, x2 + 1e-2*xspan)
+    y1, y2 = plt.ylim()
+    yspan = y2 - y1
+    plt.ylim(y1 - 1e-2*yspan, y2 + 1e-2*yspan)
     plt.show()

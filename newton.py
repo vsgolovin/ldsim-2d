@@ -12,28 +12,26 @@ def l2_norm(x):
 
 class NewtonSolver(object):
 
-    def __init__(self, res, jac, x0, linalg_solver, inds=None):
+    def __init__(self, fun, x0, linalg_solver, inds=None):
         """
         Class for solving a system of equations using Newton's method.
 
         Parameters
         ----------
-        res : callable
-            Right-hand side (residual) of the system.
-        jac : callable
-            Jacobian of the system.
+        fun : callable
+            Function which calculates right-hand side (residual) 'r' and
+            Jacobian of the system `J`. Must return tuple `(r, J)`.
         x0 : array-like
             Initial guess. Creates a copy of the passed array.
         linalg_solver : callable
             Method for solving the 'A*x = b` system.
         inds : iterable or NoneType
-            At which indices of solution need to be updated at every
+            Indices at which solution need to be updated at every
             iteration. `None` is equivalent to `np.arange(len(x0))`,
             i.e., the whole solution will be updated.
 
         """
-        self.rfun = res
-        self.jfun = jac
+        self.fun = fun
         self.x = np.array(x0, dtype=np.float64)
         self.la_solver = linalg_solver
         if inds is None:
@@ -58,15 +56,17 @@ class NewtonSolver(object):
         assert omega>0 and omega<=1.0
 
         # calculate residual and Jacobian
-        self.rvec = self.rfun(self.x)
+        self.rvec, self.jac = self.fun(self.x)
         self.rnorms.append(l2_norm(self.rvec))
-        self.jac = self.jfun(self.x)
 
         # solve J*dx = -r system and update x
         dx = self.la_solver(self.jac, -self.rvec)
-        self.fluct.append(l2_norm(dx)/l2_norm(self.x))
+        fluct = l2_norm(dx) / l2_norm(self.x)
+        self.fluct.append(fluct)
         self.x[self.inds] += dx*omega
         self.i += 1
+
+        return fluct
 
     def solve(self, maxiter=500, fluct=1e-7, omega=1.0):
         """
@@ -85,34 +85,35 @@ class NewtonSolver(object):
         """
         for _ in range(maxiter):
             self.step(omega)
-            if self.fluct[-1]<fluct:
+            if self.fluct[-1] < fluct:
                 break
 
+
 if __name__=='__main__':
-    # solving a simple nonlinear system
+    # solve a simple nonlinear system
     import matplotlib.pyplot as plt
 
-    def residual(x):
-         r = np.empty(2)
-         r[0] = 2*x[0]**2 + 3*x[1] - 8
-         r[1] = 3*x[0] - 1*x[1]**2 + 1
-         return r
+    def nonlin_system(x):
+        # residual
+        r = np.empty(2)
+        r[0] = 2*x[0]**2 + 3*x[1] - 8
+        r[1] = 3*x[0] - 1*x[1]**2 + 1
 
-    def jacobian(x):
+        # Jacobian
         j = np.empty((2, 2))
         j[0, 0] = 4*x[0]
         j[0, 1] = 3
         j[1, 0] = 3
         j[1, 1] = -2*x[1]
-        return j
+        return r, j
 
-    niter = 20  # number of iterations
+    niter = 30  # number of iterations
     x_real = np.array([1, 2])  # actual solution
     x0 = np.array([4, -1])  # initial guess
     solutions = np.zeros((niter+1, 2), dtype=float)
     solutions[0, :] = x0
 
-    sol = NewtonSolver(residual, jacobian, [0, 3], np.linalg.solve)
+    sol = NewtonSolver(nonlin_system, [0, 3], np.linalg.solve)
     for i in range(niter):
         sol.step(omega=0.8)
         solutions[i+1, :] = sol.x.copy()
