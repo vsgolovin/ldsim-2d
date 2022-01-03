@@ -1266,7 +1266,7 @@ class LaserDiode(object):
         phi_n = self.sol['phi_n']
 
         # n = Nc * F(nu_n)
-        F = sdf.fermi_fdint
+        F = sdf.fermi_approx
         nu_n1 = (psi[:-1]-phi_n[:-1]-self.ybn['Ec']) / self.Vt  # (m+1)
         nu_n2 = (psi[1:]-phi_n[1:]-self.ybn['Ec']) / self.Vt
         exp_nu_n1 = np.exp(nu_n1)
@@ -1282,7 +1282,7 @@ class LaserDiode(object):
             return jn
 
         # electron current density derivatives
-        Fdot = sdf.fermi_dot_fdint
+        Fdot = sdf.fermi_dot_approx
         gdot_n1 = flux.gdot(gn, nu_n1, F, Fdot) / self.Vt
         gdot_n2 = flux.gdot(gn, nu_n2, F, Fdot) / self.Vt
         djn_dpsi1_SG = flux.oSG_djn_dpsi1(exp_nu_n1, exp_nu_n2,
@@ -1313,7 +1313,7 @@ class LaserDiode(object):
         phi_p = self.sol['phi_p']
 
         #  p = Nv * F(nu_p)
-        F = sdf.fermi_fdint
+        F = sdf.fermi_approx
         nu_p1 = (-psi[:-1]+phi_p[:-1]+self.ybn['Ev']) / self.Vt
         nu_p2 = (-psi[1:]+phi_p[1:]+self.ybn['Ev']) / self.Vt
         exp_nu_p1 = np.exp(nu_p1)
@@ -1329,7 +1329,7 @@ class LaserDiode(object):
             return jp
 
         # hole current density derivatives
-        Fdot = sdf.fermi_dot_fdint
+        Fdot = sdf.fermi_dot_approx
         gdot_p1 = flux.gdot(gp, nu_p1, F, Fdot) / self.Vt
         gdot_p2 = flux.gdot(gp, nu_p2, F, Fdot) / self.Vt
         djp_dpsi1_SG = flux.oSG_djp_dpsi1(exp_nu_p1, exp_nu_p2,

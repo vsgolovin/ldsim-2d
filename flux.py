@@ -4,7 +4,9 @@ Current density calculation.
 """
 
 import numpy as np
-import sdf
+from sdf import fermi_approx as fermi
+from sdf import fermi_dot_approx as fermi_dot
+
 
 def bernoulli(x):
     if isinstance(x, np.ndarray):
@@ -16,6 +18,7 @@ def bernoulli(x):
     else:
         y = x/(np.exp(x)-1)
     return y
+
 
 def bernoulli_dot(x):
     if isinstance(x, np.ndarray):
@@ -29,6 +32,7 @@ def bernoulli_dot(x):
     else:
         y = (np.exp(x)-x*np.exp(x)-1) / (np.exp(x)-1)**2
     return y
+
 
 #%% Scharfetter-Gummel expressions for current density and its derivatives
 def SG_jn(n1, n2, B_plus, B_minus, h, Vt, q, mu_n):
@@ -76,6 +80,7 @@ def SG_djp_dphip1(pdot, B_plus, h, Vt, q, mu_p):
 def SG_djp_dphip2(pdot, B_minus, h, Vt, q, mu_p):
     jdot = -q*mu_p*Vt/h * B_minus * pdot
     return jdot
+
 
 #%% original Scharfetter-Gummel scheme with Boltzmann statistics
 def oSG_jn(exp_nu_1, exp_nu_2, B_plus, B_minus, h, Nc, Vt, q, mu_n):
@@ -126,15 +131,15 @@ def oSG_djp_dphip2(exp_nu_2, B_minus, h, Nv, q, mu_p):
     jdot = -q*mu_p/h * Nv * B_minus*exp_nu_2
     return jdot
 
+
 #%% Modified Scharfetter-Gummel scheme
-def g(nu_1, nu_2, sdf_F=sdf.fermi_fdint):
+def g(nu_1, nu_2, sdf_F=fermi):
     "Diffusion enhancement factor."
     F = sdf_F
     g = np.sqrt( (F(nu_1)*F(nu_2)) / (np.exp(nu_1)*np.exp(nu_2)) )
     return g
 
-def gdot(g, nu, sdf_F=sdf.fermi_fdint,
-         sdf_Fdot=sdf.fermi_dot_fdint):
+def gdot(g, nu, sdf_F=fermi, sdf_Fdot=fermi_dot):
     "Diffusion enhancement factor `g` derivative with respect to `nu`."
     F = sdf_F
     Fdot = sdf_Fdot

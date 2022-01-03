@@ -4,37 +4,38 @@ Functions for calculating free carrier densities and their derivatives.
 """
 
 import numpy as np
-import sdf
+from sdf import fermi_approx as fermi
+from sdf import fermi_dot_approx as fermi_dot
 
 def n(psi, phi_n, Nc, Ec, Vt):
-    nu = (psi-phi_n-Ec)/Vt
-    F = sdf.fermi_fdint(nu)
-    return Nc*F
+    eta = (psi - phi_n - Ec)/Vt
+    F = fermi(eta)
+    return Nc * F
 
 def dn_dpsi(psi, phi_n, Nc, Ec, Vt):
-    nu = (psi-phi_n-Ec)/Vt
-    Fdot = sdf.fermi_dot_fdint(nu)
-    return Nc*Fdot/Vt
+    eta = (psi-phi_n-Ec)/Vt
+    Fdot = fermi_dot(eta)
+    return Nc * Fdot / Vt
 
 def dn_dphin(psi, phi_n, Nc, Ec, Vt):
-    nu = (psi-phi_n-Ec)/Vt
-    Fdot = sdf.fermi_dot_fdint(nu)
-    return -Nc*Fdot/Vt
+    eta = (psi-phi_n-Ec)/Vt
+    Fdot = fermi_dot(eta)
+    return -Nc * Fdot / Vt
 
 def p(psi, phi_p, Nv, Ev, Vt):
-    nu = (-psi+phi_p+Ev)/Vt
-    F = sdf.fermi_fdint(nu)
-    return Nv*F
+    eta = (-psi + phi_p + Ev) / Vt
+    F = fermi(eta)
+    return Nv * F
 
 def dp_dpsi(psi, phi_p, Nv, Ev, Vt):
-    nu = (-psi+phi_p+Ev)/Vt
-    Fdot = sdf.fermi_dot_fdint(nu)
-    return -Nv*Fdot/Vt
+    eta = (-psi + phi_p + Ev) / Vt
+    Fdot = fermi_dot(eta)
+    return -Nv * Fdot/Vt
 
 def dp_dphip(psi, phi_p, Nv, Ev, Vt):
-    nu = (-psi+phi_p+Ev)/Vt
-    Fdot = sdf.fermi_dot_fdint(nu)
-    return Nv*Fdot/Vt
+    eta = (-psi + phi_p + Ev) / Vt
+    Fdot = fermi_dot(eta)
+    return Nv * Fdot / Vt
 
 # testing
 test_err = 1e-2
